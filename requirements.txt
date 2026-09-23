@@ -7,3 +7,4 @@ pyautogui>=0.9.54
 psutil>=6.0
 openai>=1.0
 google-genai>=1.0
+typesafe-sdk>=0.7.1,<0.8
