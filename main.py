@@ -22,6 +22,8 @@ from config import (
     KEYBOARD_TOGGLE_COOLDOWN_S,
     KEYBOARD_TOGGLE_HOLD_S,
     PROCESS_PRIORITY,
+    AI_GESTURE_MAX_AGE_S,
+    AI_GESTURE_MIN_CONFIDENCE,
     SHOW_CAMERA_UI,
     TIMER_RESOLUTION_MS,
 )
@@ -30,7 +32,12 @@ from core.actuator import MouseActuator
 from core.camera import AsyncCamera
 from core.display import build_trackpad_zone, build_virtual_desktop
 from core.gestures import GestureOrchestrator
-from core.gestures.utils import is_three_finger_keyboard_pose
+from core.gesture_ai import SemanticGestureAI
+from core.gestures.utils import (
+    is_three_finger_keyboard_pose,
+    is_peace_sign,
+    normalized_distance,
+)
 from core.tracker import HandTracker
 from core.virtual_keyboard import VirtualKeyboard
 
@@ -126,7 +133,7 @@ class KeyboardToggle:
         self.armed = True
         self.stable_frames = 0
 
-    def update(self, lms: Optional[list]) -> bool:
+    def update(self, lms: Optional[list], authorized: bool = False) -> bool:
         now = time.perf_counter()
         pose = _keyboard_toggle_pose(lms)
 
@@ -143,7 +150,11 @@ class KeyboardToggle:
         if self.started is None:
             self.started = now
 
-        if now - self.started >= self.hold_seconds and now - self.last_toggle >= self.cooldown_seconds:
+        if (
+            authorized
+            and now - self.started >= self.hold_seconds
+            and now - self.last_toggle >= self.cooldown_seconds
+        ):
             self.last_toggle = now
             self.started = None
             self.stable_frames = 0
@@ -158,11 +169,55 @@ class KeyboardToggle:
         return max(0.0, min(1.0, (time.perf_counter() - self.started) / self.hold_seconds))
 
 
+def _gesture_candidate(hands, keyboard_visible: bool, wrist_dy: float) -> tuple[str | None, str]:
+    """Return a semantic AI candidate and a non-authoritative local hint."""
+    left = hands.left
+    right = hands.right
+    left_keyboard = _keyboard_toggle_pose(left)
+
+    if left_keyboard:
+        return "keyboard_toggle", "MediaPipe reports the left hand in the three-finger keyboard pose."
+
+    if keyboard_visible:
+        if right and len(right) >= 21:
+            index_pinch = normalized_distance(right, 4, 8) <= 0.28
+            if index_pinch:
+                return "keyboard_type", "Right-hand thumb-index pinch is present over the virtual keyboard."
+        return None, "No deliberate keyboard gesture candidate."
+
+    if left and right and len(left) >= 21 and len(right) >= 21:
+        left_pinch = normalized_distance(left, 4, 8) <= 0.28
+        right_pinch = normalized_distance(right, 4, 8) <= 0.28
+        if left_pinch and right_pinch:
+            return "two_hand_pinch", "Both hands are holding thumb-index pinches."
+
+    if right and len(right) >= 21:
+        index_pinch = normalized_distance(right, 4, 8) <= 0.28
+        middle_pinch = normalized_distance(right, 4, 12) <= 0.28
+        if middle_pinch and not index_pinch:
+            return "middle_pinch", "Right thumb-middle pinch is present."
+        if index_pinch:
+            return "index_pinch", "Right thumb-index pinch is present; hold duration is supplied separately."
+        if is_peace_sign(right):
+            direction = "upward" if wrist_dy < 0 else "downward" if wrist_dy > 0 else "stationary"
+            return "scroll_sign", f"Right hand shows the peace/scroll sign with local wrist movement {direction}."
+
+    return None, "No deliberate gesture candidate."
+
 def _mirror(landmark, width: int, height: int) -> tuple[int, int]:
     return int((1.0 - landmark.x) * width), int(landmark.y * height)
 
 
-def _draw_status(frame, mode: str, fps: float, keyboard_toggle: KeyboardToggle, ai: AIAssistant, ai_text: str) -> None:
+def _draw_status(
+    frame,
+    mode: str,
+    fps: float,
+    keyboard_toggle: KeyboardToggle,
+    ai: AIAssistant,
+    ai_text: str,
+    ai_gesture: str,
+    ai_confidence: float,
+) -> None:
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (6, 6), (w - 6, 86), (18, 18, 22), -1)
     title = "VIRTUAL KEYBOARD" if mode == "keyboard" else "AIR MOUSE"
@@ -186,7 +241,27 @@ def _draw_status(frame, mode: str, fps: float, keyboard_toggle: KeyboardToggle, 
             cv2.LINE_AA,
         )
     else:
-        cv2.putText(frame, f"FPS {fps:.0f} | {ai.status}", (w - 390, 77), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (195, 200, 208), 1, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            f"FPS {fps:.0f} | {ai.status}",
+            (w - 390, 77),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.34,
+            (195, 200, 208),
+            1,
+            cv2.LINE_AA,
+        )
+        if ai_gesture:
+            cv2.putText(
+                frame,
+                f"AI gesture: {ai_gesture} ({ai_confidence:.0%})",
+                (18, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.40,
+                (0, 220, 255),
+                1,
+                cv2.LINE_AA,
+            )
 
     if ai_text:
         panel_top = 96
@@ -205,9 +280,16 @@ def run() -> None:
     keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
     toggle = KeyboardToggle()
     ai = AIAssistant()
+    semantic_ai = SemanticGestureAI(ai, min_confidence=AI_GESTURE_MIN_CONFIDENCE)
     ai_text = ""
+    ai_gesture = ""
+    ai_confidence = 0.0
+    previous_right_wrist_y: float | None = None
+    pinch_candidate_started: float | None = None
+    previous_candidate: str | None = None
 
     def emergency_restore():
+        semantic_ai.close()
         keyboard.close()
         if original_settings:
             _restore_windows_settings(original_settings)
@@ -220,7 +302,12 @@ def run() -> None:
     desktop = build_virtual_desktop()
     trackpad = build_trackpad_zone()
     actuator = MouseActuator(desktop.total_width, desktop.total_height)
-    processor = GestureOrchestrator(actuator, desktop, trackpad)
+    processor = GestureOrchestrator(
+        actuator,
+        desktop,
+        trackpad,
+        ai_required=semantic_ai.enabled,
+    )
 
     fps_clock = time.perf_counter()
     fps_frames = 0
@@ -241,21 +328,87 @@ def run() -> None:
 
                 hands = tracker.process(frame)
 
-                if toggle.update(hands.left):
+                now = time.perf_counter()
+                wrist_dy = 0.0
+                if hands.right and len(hands.right) >= 21 and previous_right_wrist_y is not None:
+                    wrist_dy = hands.right[0].y - previous_right_wrist_y
+                if hands.right and len(hands.right) >= 21:
+                    previous_right_wrist_y = hands.right[0].y
+                else:
+                    previous_right_wrist_y = None
+
+                candidate, hands_hint = _gesture_candidate(
+                    hands,
+                    keyboard.visible,
+                    wrist_dy,
+                )
+
+                if candidate != previous_candidate:
+                    pinch_candidate_started = now if candidate in {"index_pinch", "middle_pinch"} else None
+                    semantic_ai.clear()
+                    previous_candidate = candidate
+                elif candidate in {"index_pinch", "middle_pinch"} and pinch_candidate_started is None:
+                    pinch_candidate_started = now
+                if candidate is None:
+                    pinch_candidate_started = None
+
+                if candidate in {"index_pinch", "middle_pinch"} and pinch_candidate_started is not None:
+                    held = now - pinch_candidate_started
+                    hands_hint += f" Pinch has been held for {held:.2f}s."
+                if candidate == "scroll_sign":
+                    hands_hint += f" Current frame-to-frame wrist dy={wrist_dy:.4f}."
+
+                semantic_ai.submit(
+                    frame,
+                    candidate or "",
+                    "keyboard" if keyboard.visible else "mouse",
+                    hands_hint,
+                )
+                semantic_ai.poll()
+
+                decision = None
+                if candidate:
+                    decision = semantic_ai.current(candidate, max_age=AI_GESTURE_MAX_AGE_S)
+                if decision is not None:
+                    ai_gesture = decision.gesture
+                    ai_confidence = decision.confidence
+                else:
+                    ai_gesture = ""
+                    ai_confidence = 0.0
+
+                def ai_authorizes(expected: str, target: str) -> bool:
+                    if not semantic_ai.enabled:
+                        return True
+                    return (
+                        decision is not None
+                        and decision.gesture == expected
+                        and decision.target_hand in {target, "both"}
+                    )
+
+                keyboard_toggle_authorized = ai_authorizes("keyboard_toggle", "left")
+                if toggle.update(hands.left, authorized=keyboard_toggle_authorized):
                     keyboard.toggle()
                     processor.reset()
-                    logger.info("Virtual keyboard %s", "enabled" if keyboard.visible else "disabled")
+                    semantic_ai.clear()
+                    previous_candidate = None
+                    logger.info(
+                        "Virtual keyboard %s%s",
+                        "enabled" if keyboard.visible else "disabled",
+                        " (AI authorized)" if semantic_ai.enabled else "",
+                    )
 
                 if keyboard.visible:
-                    # Only the right hand is allowed to type. The left hand stays
-                    # dedicated to the explicit keyboard-toggle pose.
                     active = hands.right
                     display = cv2.flip(frame, 1)
                     if active and len(active) >= 21:
                         ix, iy = _mirror(active[8], frame.shape[1], frame.shape[0])
                         tx, ty = _mirror(active[4], frame.shape[1], frame.shape[0])
                         keyboard.update_hover(ix, iy)
-                        keyboard.handle_pinch_type((tx, ty), (ix, iy))
+                        keyboard.handle_pinch_type(
+                            (tx, ty),
+                            (ix, iy),
+                            ai_allowed=ai_authorizes("keyboard_type", "right"),
+                        )
                         keyboard.update_gesture((ix, iy))
                         keyboard.draw(display, finger_pos=(ix, iy))
                     else:
@@ -264,7 +417,10 @@ def run() -> None:
                         keyboard.draw(display, finger_pos=None)
                     frame = display
                 else:
-                    processor.process(hands)
+                    processor.process(
+                        hands,
+                        ai_gesture=ai_gesture or None,
+                    )
                     frame = cv2.flip(frame, 1)
 
                 fps_frames += 1
@@ -275,7 +431,16 @@ def run() -> None:
                     fps_frames = 0
                     fps_clock = now
 
-                _draw_status(frame, "keyboard" if keyboard.visible else "mouse", fps, toggle, ai, ai_text)
+                _draw_status(
+                    frame,
+                    "keyboard" if keyboard.visible else "mouse",
+                    fps,
+                    toggle,
+                    ai,
+                    ai_text,
+                    ai_gesture,
+                    ai_confidence,
+                )
 
                 if DEBUG_GESTURES:
                     cv2.imshow("AirMouse Debug", draw_debug_frame(frame, hands, processor.right_state))
