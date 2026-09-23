@@ -58,6 +58,8 @@ class SemanticGestureAI:
         self._last_request_at = 0.0
         self._last_submitted_candidate = ""
         self._decision: GestureDecision | None = None
+        self._generation = 0
+        self._future_generation = 0
 
         if self.enabled:
             from concurrent.futures import ThreadPoolExecutor
@@ -94,6 +96,7 @@ class SemanticGestureAI:
             self._decision = None
             self._last_submitted_candidate = ""
             self._last_request_at = 0.0
+            self._generation += 1
 
     def submit(
         self,
@@ -117,6 +120,9 @@ class SemanticGestureAI:
                 return
             self._last_submitted_candidate = candidate
             self._last_request_at = now
+            self._generation += 1
+            generation = self._generation
+            self._future_generation = generation
             executor = self._executor
 
         if executor is None:
@@ -143,6 +149,8 @@ class SemanticGestureAI:
             return None
 
         with self._lock:
+            if self._future_generation != self._generation:
+                return None
             self._decision = decision
         return decision
 
