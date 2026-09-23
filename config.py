@@ -52,7 +52,7 @@ AI_VISION_MAX_WIDTH=640
 # arming/confirmation.
 ENABLE_LEFT_SYSTEM_SHORTCUTS=False
 
-FLIP_HANDEDNESS=False
+FLIP_HANDEDNESS=True  # Camera frames are unmirrored before display mirroring
 DEBUG_GESTURES=False
 SHOW_CAMERA_UI=True
 TIMER_RESOLUTION_MS=1
