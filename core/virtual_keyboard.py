@@ -66,6 +66,7 @@ class VirtualKeyboard:
     ):
         self.frame_width = frame_width
         self.frame_height = frame_height
+        self.visible = False
         self.key_width = key_width
         self.key_height = key_height
         self.key_margin = key_margin
@@ -102,6 +103,19 @@ class VirtualKeyboard:
         # Smoothed pinch distance
         self._pinch_dist_buffer: deque[float] = deque(maxlen=5)
         self._smooth_pinch_dist: float | None = None
+
+    def set_visible(self, visible: bool) -> None:
+        self.visible = visible
+        if not visible:
+            self.is_pinching = False
+            self._pinch_active_key = None
+
+    def toggle(self) -> bool:
+        self.set_visible(not self.visible)
+        return self.visible
+
+    def close(self) -> None:
+        self.set_visible(False)
 
     def _build_layout(self) -> list[KeyButton]:
         """Create KeyButton objects from the QWERTY layout with computed positions."""
