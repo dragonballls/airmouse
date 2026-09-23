@@ -45,6 +45,7 @@ def ensure_model()->Path:
         raise RuntimeError(f"Could not provision MediaPipe model: {exc}") from exc
 class HandTracker:
     def __init__(self)->None:
+        self._last_timestamp_ms=0
         base=python.BaseOptions(model_asset_path=str(ensure_model()))
         opts=HandLandmarkerOptions(base_options=base,running_mode=RunningMode.VIDEO,
             num_hands=MP_MAX_HANDS,min_hand_detection_confidence=MP_DETECTION_CONFIDENCE,
@@ -58,7 +59,8 @@ class HandTracker:
                 frame=cv2.resize(frame,(INFERENCE_WIDTH,INFERENCE_HEIGHT),interpolation=cv2.INTER_AREA)
             rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
             image=mp.Image(image_format=mp.ImageFormat.SRGB,data=rgb)
-            timestamp_ms=time.monotonic_ns()//1_000_000
+            timestamp_ms=max(time.monotonic_ns()//1_000_000, self._last_timestamp_ms+1)
+            self._last_timestamp_ms=timestamp_ms
             result=self._detector.detect_for_video(image,timestamp_ms)
         except Exception as exc:
             logger.warning("MediaPipe processing error: %s",exc)
