@@ -111,6 +111,24 @@ class TypingKeyboardOverlay:
         self._native_setup()
         self._place()
 
+    def set_visible(self, visible: bool, anchor: tuple[int, int] | None = None, desktop: VirtualDesktop | None = None) -> None:
+        if visible:
+            if anchor is None or desktop is None:
+                return
+            self.show(anchor, desktop)
+        else:
+            self.hide()
+
+    def toggle(self, anchor: tuple[int, int], desktop: VirtualDesktop) -> bool:
+        if self.visible:
+            self.hide()
+        else:
+            self.show(anchor, desktop)
+        return self.visible
+
+    def close(self) -> None:
+        self.hide()
+
     def hide(self) -> None:
         self.visible = False
         self.keyboard.close()
