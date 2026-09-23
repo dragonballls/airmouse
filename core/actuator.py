@@ -138,6 +138,11 @@ class MouseActuator:
     def locked_position(self) -> tuple[int, int] | None:
         return self._locked_position
 
+    @property
+    def cursor_position(self) -> tuple[int, int] | None:
+        """Return the current Windows cursor position."""
+        return self._get_cursor_position()
+
     def left_click(self) -> None:
         self._pynput.click(Button.left)
 
