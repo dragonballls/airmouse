@@ -36,8 +36,8 @@ class LeftHandProcessor:
     def __init__(
         self,
         actuator: MouseActuator,
-        desktop: VirtualDesktop,
-        trackpad: TrackpadZone,
+        desktop: VirtualDesktop | None = None,
+        trackpad: TrackpadZone | None = None,
     ) -> None:
         self._actuator = actuator
         self._desktop = desktop
@@ -71,6 +71,11 @@ class LeftHandProcessor:
             self._fist_stable = 0
             self._filter_x.reset()
             self._filter_y.reset()
+            return
+
+        # Preserve the legacy lightweight constructor for callers/tests that
+        # instantiate LeftHandProcessor with only an actuator.
+        if self._desktop is None or self._trackpad is None:
             return
 
         now = time.perf_counter()
