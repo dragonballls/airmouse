@@ -1,124 +1,70 @@
 # core/tracker.py
-"""
-MediaPipe HandLandmarker wrapper (Tasks API — mediapipe ≥0.10.14).
-
-Extracts hand landmarks from a BGR frame.
-Returns None if no hand detected; returns list of 21 Landmark objects otherwise.
-
-Key optimizations:
-- RunningMode.IMAGE: simplest mode, stateless per-frame inference
-- RGB conversion + mp.Image wrapper: required by Tasks API
-- No internal array copy: mp.Image takes ownership of the numpy buffer
-"""
-
+"""MediaPipe Hand Landmarker with automatic official model provisioning."""
+from __future__ import annotations
 import logging
 from dataclasses import dataclass
-
-import cv2
-import mediapipe as mp
+from pathlib import Path
+from urllib.request import Request,urlopen
+import cv2, mediapipe as mp, numpy as np
 from mediapipe.tasks import python
-from mediapipe.tasks.python.vision import HandLandmarker, HandLandmarkerOptions, RunningMode
-import numpy as np
-
-from config import MP_DETECTION_CONFIDENCE, MP_TRACKING_CONFIDENCE, MP_MODEL_PATH, FLIP_HANDEDNESS
-
-logger = logging.getLogger(__name__)
-
-
+from mediapipe.tasks.python.vision import HandLandmarker,HandLandmarkerOptions,RunningMode
+from config import FLIP_HANDEDNESS,MP_DETECTION_CONFIDENCE,MP_MAX_HANDS,MP_MODEL_PATH,MP_MODEL_URL,MP_TRACKING_CONFIDENCE
+logger=logging.getLogger(__name__)
 @dataclass
 class Landmark:
-    """Normalized [0.0–1.0] landmark coordinate."""
     x: float
     y: float
     z: float
-    visibility: float = 0.0
-
-
+    visibility: float=0.0
 @dataclass
 class HandsResult:
-    """Holds landmarks for both hands. None = that hand not detected this frame."""
-    left: list[Landmark] | None = None   # user's left hand (21 landmarks)
-    right: list[Landmark] | None = None  # user's right hand (21 landmarks)
-
-
-# Landmark index constants — MediaPipe Hand Landmark Model
-LM_INDEX_TIP = 8
-LM_INDEX_PIP = 6
-LM_MIDDLE_TIP = 12
-LM_MIDDLE_PIP = 10
-LM_RING_TIP = 16
-LM_RING_PIP = 14
-LM_PINKY_TIP = 20
-LM_PINKY_PIP = 18
-LM_THUMB_TIP = 4
-LM_THUMB_MCP = 2
-
-
+    left: list[Landmark]|None=None
+    right: list[Landmark]|None=None
+def resolve_model_path()->Path:
+    p=Path(MP_MODEL_PATH)
+    return p if p.is_absolute() else Path(__file__).resolve().parents[1]/p
+def ensure_model()->Path:
+    p=resolve_model_path()
+    if p.exists() and p.stat().st_size>100_000: return p
+    p.parent.mkdir(parents=True,exist_ok=True)
+    tmp=p.with_suffix(p.suffix+".download")
+    try:
+        req=Request(MP_MODEL_URL,headers={"User-Agent":"Unified-Airmouse/1.0"})
+        with urlopen(req,timeout=60) as src,tmp.open("wb") as dst:
+            while True:
+                chunk=src.read(262144)
+                if not chunk: break
+                dst.write(chunk)
+        if tmp.stat().st_size<=100_000: raise RuntimeError("model download too small")
+        tmp.replace(p)
+        logger.info("Downloaded MediaPipe hand model to %s",p)
+        return p
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f"Could not provision MediaPipe model: {exc}") from exc
 class HandTracker:
-    """
-    Wraps MediaPipe HandLandmarker (Tasks API) for single-hand landmark extraction.
-    Intended to be used as a context manager.
-    """
-
-    def __init__(self) -> None:
-        base_options = python.BaseOptions(model_asset_path=MP_MODEL_PATH)
-        options = HandLandmarkerOptions(
-            base_options=base_options,
-            running_mode=RunningMode.IMAGE,
-            num_hands=2,
-            min_hand_detection_confidence=MP_DETECTION_CONFIDENCE,
-            min_hand_presence_confidence=MP_TRACKING_CONFIDENCE,
-            min_tracking_confidence=MP_TRACKING_CONFIDENCE,
-        )
-        self._detector = HandLandmarker.create_from_options(options)
-        logger.info("MediaPipe HandLandmarker initialized (max_hands=2)")
-
-    def process(self, frame: np.ndarray) -> HandsResult:
-        """
-        Process one BGR frame. Always returns HandsResult (never None).
-        Each field is None if that hand was not detected.
-
-        MediaPipe 'Left' from camera perspective = user's Right hand (mirrored).
-        """
-        result_obj = HandsResult()
+    def __init__(self)->None:
+        base=python.BaseOptions(model_asset_path=str(ensure_model()))
+        opts=HandLandmarkerOptions(base_options=base,running_mode=RunningMode.IMAGE,
+            num_hands=MP_MAX_HANDS,min_hand_detection_confidence=MP_DETECTION_CONFIDENCE,
+            min_hand_presence_confidence=MP_TRACKING_CONFIDENCE,min_tracking_confidence=MP_TRACKING_CONFIDENCE)
+        self._detector=HandLandmarker.create_from_options(opts)
+    def process(self,frame:np.ndarray)->HandsResult:
+        out=HandsResult()
+        if frame is None or frame.size==0:return out
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            result = self._detector.detect(mp_image)
-        except Exception as e:
-            logger.warning("MediaPipe processing error: %s", e)
-            return result_obj
-
-        if not result.hand_landmarks:
-            return result_obj
-
-        for i, hand_lms in enumerate(result.hand_landmarks):
-            landmarks = [
-                Landmark(
-                    x=lm.x,
-                    y=lm.y,
-                    z=lm.z,
-                    visibility=getattr(lm, "visibility", None) or 0.0,
-                )
-                for lm in hand_lms
-            ]
-            cam_label = result.handedness[i][0].category_name
-            logger.debug("MediaPipe label=%s FLIP_HANDEDNESS=%s", cam_label, FLIP_HANDEDNESS)
-            # MediaPipe Tasks API assumes mirrored input → "Right" = user's right.
-            # If FLIP_HANDEDNESS=True, invert (for non-standard camera setups).
-            is_right = (cam_label == "Right") if not FLIP_HANDEDNESS else (cam_label == "Left")
-            if is_right:
-                result_obj.right = landmarks
-            else:
-                result_obj.left = landmarks
-
-        return result_obj
-
-    def close(self) -> None:
-        self._detector.close()
-
-    def __enter__(self) -> "HandTracker":
-        return self
-
-    def __exit__(self, *_) -> None:
-        self.close()
+            rgb=cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+            result=self._detector.detect(mp.Image(image_format=mp.ImageFormat.SRGB,data=rgb))
+        except Exception as exc:
+            logger.warning("MediaPipe processing error: %s",exc)
+            return out
+        for i,hand in enumerate(result.hand_landmarks or []):
+            lms=[Landmark(l.x,l.y,l.z,getattr(l,"visibility",0.0) or 0.0) for l in hand]
+            label=result.handedness[i][0].category_name
+            is_right=(label=="Right") if not FLIP_HANDEDNESS else (label=="Left")
+            if is_right: out.right=lms
+            else: out.left=lms
+        return out
+    def close(self)->None:self._detector.close()
+    def __enter__(self)->"HandTracker":return self
+    def __exit__(self,*_)->None:self.close()
