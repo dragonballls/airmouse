@@ -1,5 +1,5 @@
 # core/gestures/two_hand.py
-"""Deliberate two-hand gestures with optional AI semantic gating."""
+"""Deliberate two-hand gestures with optional semantic gating."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import time
 
 from config import (
     GESTURE_COOLDOWN_SECONDS,
+    THUMB_INDEX_CLICK_DIST,
     ZOOM_COOLDOWN_S,
     ZOOM_STABILITY_FRAMES,
     ZOOM_WRIST_DELTA,
@@ -17,8 +18,6 @@ from core.gestures.utils import normalized_distance
 from core.tracker import Landmark
 
 logger = logging.getLogger(__name__)
-
-_PINCH_RATIO = 0.24
 
 
 class TwoHandProcessor:
@@ -41,9 +40,12 @@ class TwoHandProcessor:
         ai_gesture: str | None = None,
         ai_required: bool = False,
     ) -> bool:
+        del ai_gesture
+
         now = time.perf_counter()
-        left_pinched = normalized_distance(left_lm, 4, 8) <= _PINCH_RATIO
-        right_pinched = normalized_distance(right_lm, 4, 8) <= _PINCH_RATIO
+        pinch_ratio = THUMB_INDEX_CLICK_DIST
+        left_pinched = normalized_distance(left_lm, 4, 8) <= pinch_ratio
+        right_pinched = normalized_distance(right_lm, 4, 8) <= pinch_ratio
 
         if not (left_pinched and right_pinched):
             self.reset()
@@ -75,6 +77,4 @@ class TwoHandProcessor:
             self._last_action = now
             self._fired = True
 
-        # Returning True suppresses single-hand click processing while both
-        # hands are deliberately pinching.
         return True
