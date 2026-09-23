@@ -109,9 +109,10 @@ class VirtualKeyboard:
 
     def set_visible(self, visible: bool) -> None:
         self.visible = visible
+        self.is_pinching = False
+        self._pinch_active_key = None
         if not visible:
-            self.is_pinching = False
-            self._pinch_active_key = None
+            self._reset_smoothing()
             for modifier in tuple(self._held_modifiers):
                 pyautogui.keyUp(modifier)
             self._held_modifiers.clear()
