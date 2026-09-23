@@ -1,52 +1,43 @@
 # core/gestures/right_hand.py
-"""
-Right-hand gesture processor.
+"""Conservative right-hand mouse processor.
 
-State machine:
-  IDLE
-    ├─ fist                      → LOCKED
-    ├─ peace sign                → SCROLLING
-    └─ thumb+index pinch         → LEFT_PINCH_PENDING_DRAG
-
-  LOCKED
-    └─ any finger extends        → IDLE
-
-  SCROLLING
-    ├─ wrist flick up            → scroll(+ticks)  [stay SCROLLING]
-    ├─ wrist flick down          → scroll(-ticks)  [stay SCROLLING]
-    └─ peace sign released       → IDLE
-
-  LEFT_PINCH_PENDING_DRAG
-    ├─ pinch released < DRAG_HOLD_SECONDS  → left_click() or double_click() → IDLE
-    └─ pinch held ≥ DRAG_HOLD_SECONDS      → drag_start() → DRAGGING
-
-  DRAGGING
-    └─ pinch released            → drag_end() → IDLE
+The right hand owns the pointer. Clicks require a stable pinch followed by a
+stable release. Holding a pinch starts a drag only after a deliberate hold.
 """
 
-import time
+from __future__ import annotations
+
 import logging
+import time
 from enum import Enum, auto
 
 from config import (
     CAMERA_FPS,
-    THUMB_INDEX_CLICK_DIST,
-    THUMB_MIDDLE_CLICK_DIST,
+    DOUBLE_CLICK_WINDOW_S,
     DRAG_HOLD_SECONDS,
     GESTURE_COOLDOWN_SECONDS,
-    DOUBLE_CLICK_WINDOW_S,
-    WRIST_VELOCITY_THRESHOLD,
-    SCROLL_TICK_SCALE,
-    SCROLL_COOLDOWN_S,
-    ONE_EURO_MINCUTOFF,
+    GESTURE_RELEASE_FRAMES,
+    GESTURE_STABILITY_FRAMES,
     ONE_EURO_BETA,
     ONE_EURO_DCUTOFF,
+    ONE_EURO_MINCUTOFF,
+    PINCH_RELEASE_DIST,
+    SCROLL_COOLDOWN_S,
+    SCROLL_TICK_SCALE,
+    THUMB_INDEX_CLICK_DIST,
+    THUMB_MIDDLE_CLICK_DIST,
+    WRIST_VELOCITY_THRESHOLD,
+)
+from core.actuator import MouseActuator
+from core.display import TrackpadZone, VirtualDesktop, map_to_desktop
+from core.filter import OneEuroFilter
+from core.gestures.utils import (
+    dist3d,
+    is_fist,
+    is_peace_sign,
+    normalized_distance,
 )
 from core.tracker import Landmark
-from core.filter import OneEuroFilter
-from core.display import VirtualDesktop, TrackpadZone, map_to_desktop
-from core.actuator import MouseActuator
-from core.gestures.utils import dist3d, is_fist, is_peace_sign
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +45,26 @@ logger = logging.getLogger(__name__)
 class _State(Enum):
     IDLE = auto()
     LEFT_PINCH_PENDING_DRAG = auto()
+    RIGHT_PINCH = auto()
     DRAGGING = auto()
     SCROLLING = auto()
     LOCKED = auto()
 
 
-class RightHandProcessor:
-    """
-    Processes right-hand landmarks each frame.
-    Call process(landmarks) where landmarks is list[Landmark] | None.
-    None means no right hand detected this frame.
-    """
+class _StableGate:
+    def __init__(self, frames: int) -> None:
+        self.frames = frames
+        self.count = 0
 
+    def update(self, active: bool) -> bool:
+        self.count = self.count + 1 if active else 0
+        return self.count >= self.frames
+
+    def reset(self) -> None:
+        self.count = 0
+
+
+class RightHandProcessor:
     def __init__(
         self,
         actuator: MouseActuator,
@@ -76,12 +75,20 @@ class RightHandProcessor:
         self._desktop = desktop
         self._trackpad = trackpad
         self._state = _State.IDLE
+
         self._pinch_start_time: float | None = None
-        self._last_click_time: float = 0.0
-        self._last_gesture_time: float = 0.0
-        self._last_scroll_time: float = 0.0
+        self._last_click_time = 0.0
+        self._last_action_time = 0.0
+        self._last_scroll_time = 0.0
         self._prev_wrist_y: float | None = None
         self._last_frame_time: float | None = None
+
+        self._left_pinch_gate = _StableGate(GESTURE_STABILITY_FRAMES)
+        self._right_pinch_gate = _StableGate(GESTURE_STABILITY_FRAMES)
+        self._left_release_gate = _StableGate(GESTURE_RELEASE_FRAMES)
+        self._right_release_gate = _StableGate(GESTURE_RELEASE_FRAMES)
+        self._peace_gate = _StableGate(GESTURE_STABILITY_FRAMES)
+
         self._filter_x = OneEuroFilter(
             freq=float(CAMERA_FPS),
             mincutoff=ONE_EURO_MINCUTOFF,
@@ -95,119 +102,134 @@ class RightHandProcessor:
             dcutoff=ONE_EURO_DCUTOFF,
         )
 
-    def process(self, landmarks: list[Landmark] | None) -> None:
-        if landmarks is None:
-            # Hand left frame — clean up drag if active
+    def _reset_gates(self) -> None:
+        self._left_pinch_gate.reset()
+        self._right_pinch_gate.reset()
+        self._left_release_gate.reset()
+        self._right_release_gate.reset()
+        self._peace_gate.reset()
+
+    def process(
+        self,
+        landmarks: list[Landmark] | None,
+        suppress_actions: bool = False,
+    ) -> None:
+        if not landmarks or len(landmarks) < 21:
             if self._state == _State.DRAGGING:
                 self._actuator.drag_end()
             self._state = _State.IDLE
             self._pinch_start_time = None
             self._prev_wrist_y = None
             self._last_frame_time = None
+            self._reset_gates()
             return
 
         now = time.perf_counter()
-
-        # Compute wrist velocity (landmark 0 = wrist joint)
-        wrist_y = landmarks[0].y
-        dt = (now - self._last_frame_time) if self._last_frame_time is not None else (1.0 / CAMERA_FPS)
-        dt = max(dt, 1e-6)  # guard divide-by-zero
-        wrist_vel_y = (
-            (wrist_y - self._prev_wrist_y) / dt
-            if self._prev_wrist_y is not None
-            else 0.0
+        dt = max(
+            now - self._last_frame_time if self._last_frame_time is not None else 1.0 / CAMERA_FPS,
+            1e-3,
         )
-        self._prev_wrist_y = wrist_y
+
+        wrist_vel_y = 0.0
+        if self._prev_wrist_y is not None:
+            wrist_vel_y = (landmarks[0].y - self._prev_wrist_y) / dt
+        self._prev_wrist_y = landmarks[0].y
         self._last_frame_time = now
 
-        fist = is_fist(landmarks)
-        peace = is_peace_sign(landmarks)
-        d_thumb_idx = dist3d(landmarks[4], landmarks[8])
-        d_thumb_mid = dist3d(landmarks[4], landmarks[12])
-        thumb_idx_pinch = d_thumb_idx < THUMB_INDEX_CLICK_DIST
+        if suppress_actions:
+            if self._state == _State.DRAGGING:
+                self._actuator.drag_end()
+            self._state = _State.IDLE
+            self._pinch_start_time = None
+            self._reset_gates()
+            return
 
-        # ── LOCKED state ──────────────────────────────────────────────────────
-        if self._state == _State.LOCKED:
-            if not fist:
-                self._state = _State.IDLE
-                logger.debug("Unlocked")
-            return  # no cursor, no gestures while locked
-
-        # ── Fist → LOCKED ─────────────────────────────────────────────────────
-        if fist and self._state not in (_State.LEFT_PINCH_PENDING_DRAG, _State.DRAGGING):
+        if is_fist(landmarks):
             if self._state == _State.DRAGGING:
                 self._actuator.drag_end()
             self._state = _State.LOCKED
-            logger.debug("Locked (fist)")
+            self._pinch_start_time = None
+            self._reset_gates()
             return
 
-        # ── SCROLLING state ───────────────────────────────────────────────────
-        if self._state == _State.SCROLLING:
-            if not peace:
+        if self._state == _State.LOCKED:
+            if not is_fist(landmarks):
                 self._state = _State.IDLE
+            else:
                 return
-            if abs(wrist_vel_y) > WRIST_VELOCITY_THRESHOLD:
-                if (now - self._last_scroll_time) >= SCROLL_COOLDOWN_S:
-                    ticks = int(min(5, max(1, abs(wrist_vel_y) / SCROLL_TICK_SCALE)))
-                    # Negative velocity = hand moved up (y=0 at top) = scroll up
-                    self._actuator.scroll(ticks if wrist_vel_y < 0 else -ticks)
-                    self._last_scroll_time = now
-                    logger.debug("Scroll %s ticks=%d vel=%.4f", "up" if wrist_vel_y < 0 else "down", ticks, wrist_vel_y)
-            return  # cursor suspended while scrolling
 
-        # ── Enter SCROLLING ───────────────────────────────────────────────────
-        if peace and self._state == _State.IDLE:
-            self._state = _State.SCROLLING
-            logger.debug("Entered scroll mode (peace sign)")
-            return
+        index_pinch = normalized_distance(landmarks, 4, 8) <= THUMB_INDEX_CLICK_DIST
+        middle_pinch = normalized_distance(landmarks, 4, 12) <= THUMB_MIDDLE_CLICK_DIST
+        index_released = normalized_distance(landmarks, 4, 8) >= PINCH_RELEASE_DIST
+        middle_released = normalized_distance(landmarks, 4, 12) >= PINCH_RELEASE_DIST
+        peace = is_peace_sign(landmarks)
 
-        # ── Right click ───────────────────────────────────────────────────────
-        if (
-            d_thumb_mid < THUMB_MIDDLE_CLICK_DIST
-            and self._state == _State.IDLE
-            and (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS
-        ):
-            self._actuator.right_click()
-            self._last_gesture_time = now
-            logger.debug("Right click (d=%.4f)", d_thumb_mid)
-            return
+        index_stable = self._left_pinch_gate.update(index_pinch)
+        middle_stable = self._right_pinch_gate.update(middle_pinch)
 
-        # ── Left click / drag state machine ───────────────────────────────────
-        if self._state == _State.IDLE:
-            if thumb_idx_pinch:
-                self._state = _State.LEFT_PINCH_PENDING_DRAG
-                self._pinch_start_time = now
+        # A right-click pinch gets priority only when it is clearly distinct
+        # from a thumb-index pinch.
+        if self._state == _State.IDLE and middle_stable and not index_pinch:
+            self._state = _State.RIGHT_PINCH
+            self._last_action_time = now
+
+        if self._state == _State.RIGHT_PINCH:
+            if self._right_release_gate.update(middle_released):
+                if now - self._last_action_time >= GESTURE_COOLDOWN_SECONDS:
+                    self._actuator.right_click()
+                    self._last_action_time = now
+                self._state = _State.IDLE
+                self._right_release_gate.reset()
+
+        elif self._state == _State.IDLE and index_stable:
+            self._state = _State.LEFT_PINCH_PENDING_DRAG
+            self._pinch_start_time = now
+            self._left_release_gate.reset()
 
         elif self._state == _State.LEFT_PINCH_PENDING_DRAG:
-            if not thumb_idx_pinch:
-                # Pinch released — fire click (double if within window)
-                if (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS:
-                    if (now - self._last_click_time) <= DOUBLE_CLICK_WINDOW_S and self._last_click_time > 0:
+            if self._left_release_gate.update(index_released):
+                if (
+                    self._pinch_start_time is not None
+                    and now - self._pinch_start_time < DRAG_HOLD_SECONDS
+                    and now - self._last_action_time >= GESTURE_COOLDOWN_SECONDS
+                ):
+                    if now - self._last_click_time <= DOUBLE_CLICK_WINDOW_S and self._last_click_time > 0:
                         self._actuator.double_click()
-                        logger.debug("Double click")
-                        self._last_click_time = 0.0  # reset so triple doesn't become double+double
+                        self._last_click_time = 0.0
                     else:
                         self._actuator.left_click()
-                        logger.debug("Left click (d=%.4f)", d_thumb_idx)
                         self._last_click_time = now
-                    self._last_gesture_time = now
+                    self._last_action_time = now
                 self._state = _State.IDLE
                 self._pinch_start_time = None
+                self._left_release_gate.reset()
 
-            elif self._pinch_start_time is not None and (now - self._pinch_start_time) >= DRAG_HOLD_SECONDS:
+            elif (
+                self._pinch_start_time is not None
+                and now - self._pinch_start_time >= DRAG_HOLD_SECONDS
+            ):
                 self._actuator.drag_start()
                 self._state = _State.DRAGGING
-                logger.debug("Drag start")
 
-        elif self._state == _State.DRAGGING:
-            if not thumb_idx_pinch:
-                self._actuator.drag_end()
-                self._state = _State.IDLE
-                self._pinch_start_time = None
-                logger.debug("Drag end")
+        elif self._state == _State.DRAGGING and self._left_release_gate.update(index_released):
+            self._actuator.drag_end()
+            self._state = _State.IDLE
+            self._pinch_start_time = None
+            self._left_release_gate.reset()
 
-        # ── Cursor movement (IDLE and DRAGGING only) ──────────────────────────
-        filtered_x = self._filter_x(landmarks[8].x, now)  # index tip
-        filtered_y = self._filter_y(landmarks[8].y, now)
-        screen_x, screen_y = map_to_desktop(filtered_x, filtered_y, self._trackpad, self._desktop)
-        self._actuator.move(screen_x, screen_y)
+        # Scroll requires a stable peace pose before wrist motion can scroll.
+        if self._state == _State.IDLE and self._peace_gate.update(peace):
+            if abs(wrist_vel_y) >= WRIST_VELOCITY_THRESHOLD and now - self._last_scroll_time >= SCROLL_COOLDOWN_S:
+                ticks = int(min(5, max(1, abs(wrist_vel_y) / SCROLL_TICK_SCALE)))
+                self._actuator.scroll(ticks if wrist_vel_y < 0 else -ticks)
+                self._last_scroll_time = now
+
+        # Pointer movement is always local and only happens outside deliberate
+        # scroll/pinch states.
+        if self._state in (_State.IDLE, _State.DRAGGING):
+            filtered_x = self._filter_x(landmarks[8].x, now)
+            filtered_y = self._filter_y(landmarks[8].y, now)
+            screen_x, screen_y = map_to_desktop(
+                filtered_x, filtered_y, self._trackpad, self._desktop
+            )
+            self._actuator.move(screen_x, screen_y)
