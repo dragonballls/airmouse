@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import threading
 from typing import Any
 
 import cv2
@@ -25,6 +26,7 @@ class AIAssistant:
         self._client: Any | None = None
         self._types: Any | None = None
         self._error: str | None = None
+        self._request_lock = threading.Lock()
 
         gemini_key = (
             os.getenv("GEMINI_API_KEY", "").strip()
@@ -43,7 +45,10 @@ class AIAssistant:
                 from google import genai
                 from google.genai import types
 
-                self._client = genai.Client(api_key=self.api_key)
+                self._client = genai.Client(
+                    api_key=self.api_key,
+                    http_options=types.HttpOptions(timeout=2200),
+                )
                 self._types = types
             except Exception as exc:
                 self._error = str(exc)
@@ -186,18 +191,19 @@ class AIAssistant:
             "Return only the requested JSON object."
         )
 
-        response = self._client.models.generate_content(
-            model=self.model,
-            contents=[image_part, prompt],
-            config=self._types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=schema,
-                media_resolution=self._types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-                thinking_config=self._types.ThinkingConfig(
-                    thinking_level="minimal"
+        with self._request_lock:
+            response = self._client.models.generate_content(
+                model=self.model,
+                contents=[image_part, prompt],
+                config=self._types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                    media_resolution=self._types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                    thinking_config=self._types.ThinkingConfig(
+                        thinking_level="minimal"
+                    ),
                 ),
-            ),
-        )
+            )
 
         raw = (getattr(response, "text", "") or "").strip()
         if not raw:
@@ -232,10 +238,11 @@ class AIAssistant:
                     data=image_bytes,
                     mime_type="image/jpeg",
                 )
-                response = self._client.models.generate_content(
-                    model=self.model,
-                    contents=[image_part, prompt],
-                )
+                with self._request_lock:
+                    response = self._client.models.generate_content(
+                        model=self.model,
+                        contents=[image_part, prompt],
+                    )
                 return (getattr(response, "text", "") or "").strip() or (
                     "AI returned no diagnostic text."
                 )
