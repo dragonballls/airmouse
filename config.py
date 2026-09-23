@@ -42,7 +42,10 @@ KEYBOARD_TOGGLE_COOLDOWN_S=1.5
 # AI semantic gate. When Gemini is configured, deliberate actions require a
 # matching high-confidence semantic label. Pointer movement remains local.
 AI_GESTURE_MIN_CONFIDENCE=0.68
-AI_GESTURE_MAX_AGE_S=0.55
+AI_GESTURE_MAX_AGE_S=0.75
+AI_GESTURE_GRACE_S=0.95
+AI_REQUEST_INTERVAL_S=0.25
+AI_VISION_MAX_WIDTH=640
 
 # The old left-hand Windows shortcuts are disabled because they were too easy
 # to trigger accidentally. Windows shortcuts can be added later behind explicit
