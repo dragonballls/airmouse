@@ -341,48 +341,64 @@ def _self_test() -> int:
     from core.gestures import GestureOrchestrator
     from core.text_input import TextInputDetector
 
-    os.environ["AIRMOUSE_ENABLE_GESTURE_AI"] = "0"
-    desktop = build_virtual_desktop()
-    trackpad = build_trackpad_zone()
-    actuator = MouseActuator(
-        desktop.total_width,
-        desktop.total_height,
-        origin_x=desktop.origin_x,
-        origin_y=desktop.origin_y,
+    result_path = Path(
+        os.getenv(
+            "AIRMOUSE_SELF_TEST_RESULT",
+            str(Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().with_name("airmouse-self-test.txt")),
+        )
     )
-    processor = GestureOrchestrator(actuator, desktop, trackpad)
-    processor.reset()
 
-    keyboard = VirtualKeyboard(640, 280, key_width=54, key_height=42, key_margin=5, compact=True)
-    assert keyboard.keys, "virtual keyboard did not build"
-    keyboard.close()
-
-    text_detector = TextInputDetector()
-    assert text_detector is not None
-
-    tracker = HandTracker()
     try:
-        frame = np.zeros((180, 320, 3), dtype=np.uint8)
-        first_buffer_id = None
-        for _ in range(6):
-            result = tracker.process(frame)
-            assert result.left is None and result.right is None, "synthetic blank frame produced a hand"
-            if first_buffer_id is None:
-                first_buffer_id = id(tracker._rgb_buffer)
-            else:
-                assert id(tracker._rgb_buffer) == first_buffer_id, "RGB conversion buffer was not reused"
-    finally:
-        tracker.close()
+        os.environ["AIRMOUSE_ENABLE_GESTURE_AI"] = "0"
+        desktop = build_virtual_desktop()
+        trackpad = build_trackpad_zone()
+        actuator = MouseActuator(
+            desktop.total_width,
+            desktop.total_height,
+            origin_x=desktop.origin_x,
+            origin_y=desktop.origin_y,
+        )
+        processor = GestureOrchestrator(actuator, desktop, trackpad)
+        processor.reset()
 
-    if getattr(sys, "frozen", False):
-        model_path = Path(getattr(sys, "_MEIPASS", "")) / "models" / "hand_landmarker.task"
-        if not model_path.exists():
-            model_path = Path(sys.executable).resolve().parent / "models" / "hand_landmarker.task"
-        assert model_path.exists(), f"bundled MediaPipe model missing: {model_path}"
+        keyboard = VirtualKeyboard(640, 280, key_width=54, key_height=42, key_margin=5, compact=True)
+        assert keyboard.keys, "virtual keyboard did not build"
+        keyboard.close()
 
-    print("AIRMOUSE SELF-TEST PASS")
-    return 0
+        text_detector = TextInputDetector()
+        assert text_detector is not None
 
+        tracker = HandTracker()
+        try:
+            frame = np.zeros((180, 320, 3), dtype=np.uint8)
+            first_buffer_id = None
+            for _ in range(6):
+                result = tracker.process(frame)
+                assert result.left is None and result.right is None, "synthetic blank frame produced a hand"
+                if first_buffer_id is None:
+                    first_buffer_id = id(tracker._rgb_buffer)
+                else:
+                    assert id(tracker._rgb_buffer) == first_buffer_id, "RGB conversion buffer was not reused"
+        finally:
+            tracker.close()
+
+        if getattr(sys, "frozen", False):
+            model_path = Path(getattr(sys, "_MEIPASS", "")) / "models" / "hand_landmarker.task"
+            if not model_path.exists():
+                model_path = Path(sys.executable).resolve().parent / "models" / "hand_landmarker.task"
+            assert model_path.exists(), f"bundled MediaPipe model missing: {model_path}"
+
+        result_path.write_text("AIRMOUSE SELF-TEST PASS\n", encoding="utf-8")
+        print("AIRMOUSE SELF-TEST PASS")
+        return 0
+    except Exception:
+        details = traceback.format_exc()
+        try:
+            result_path.write_text("AIRMOUSE SELF-TEST FAIL\n" + details, encoding="utf-8")
+        except Exception:
+            pass
+        print(details, file=sys.stderr)
+        return 1
 
 def run() -> None:
     original_settings: dict = {}
