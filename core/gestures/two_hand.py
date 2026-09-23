@@ -1,10 +1,5 @@
 # core/gestures/two_hand.py
-"""Deliberate two-hand gestures.
-
-The only automatic two-hand power gesture in the safe profile is zoom. It
-requires both hands to hold a stable thumb-index pinch and then move apart or
-together far enough to create one zoom event.
-"""
+"""Deliberate two-hand gestures with optional AI semantic gating."""
 
 from __future__ import annotations
 
@@ -39,7 +34,13 @@ class TwoHandProcessor:
         self._baseline_distance = None
         self._fired = False
 
-    def process(self, left_lm: list[Landmark], right_lm: list[Landmark]) -> bool:
+    def process(
+        self,
+        left_lm: list[Landmark],
+        right_lm: list[Landmark],
+        ai_gesture: str | None = None,
+        ai_required: bool = False,
+    ) -> bool:
         now = time.perf_counter()
         left_pinched = normalized_distance(left_lm, 4, 8) <= _PINCH_RATIO
         right_pinched = normalized_distance(right_lm, 4, 8) <= _PINCH_RATIO
@@ -58,10 +59,12 @@ class TwoHandProcessor:
             return True
 
         delta = wrist_distance - self._baseline_distance
+        expected = "zoom_in" if delta > 0 else "zoom_out"
         if (
             not self._fired
             and abs(delta) >= ZOOM_WRIST_DELTA
             and now - self._last_action >= max(ZOOM_COOLDOWN_S, GESTURE_COOLDOWN_SECONDS)
+            and (not ai_required or ai_gesture == expected)
         ):
             if delta > 0:
                 self._actuator.zoom_in()
