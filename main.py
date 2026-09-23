@@ -263,6 +263,7 @@ def _draw_status(
     ai_text: str,
     ai_gesture: str,
     ai_confidence: float,
+    mouse_locked: bool = False,
 ) -> None:
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (6, 6), (w - 6, 86), (18, 18, 22), -1)
@@ -270,9 +271,9 @@ def _draw_status(
     cv2.putText(frame, title, (18, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.70, (180, 225, 255), 2, cv2.LINE_AA)
 
     if mode == "keyboard":
-        hint = "Right hand: hover + thumb/index pinch to type | K = toggle | A = AI | Q = quit"
+        hint = "Right hand: hover + thumb/index pinch to type | Left 3-finger hold = toggle | K = toggle | Q = quit"
     else:
-        hint = "Right hand: point/move, pinch=click | Left 3-finger hold=keyboard | A = AI | Q = quit"
+        hint = "Left index = cursor | Right pinch = click | thumb+middle = right-click | pinch-hold = drag | Left fist hold = lock/unlock"
     cv2.putText(frame, hint, (18, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (195, 200, 208), 1, cv2.LINE_AA)
 
     if keyboard_toggle.started is not None:
@@ -324,7 +325,7 @@ def _draw_status(
 def run() -> None:
     original_settings: dict = {}
     keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
-    toggle = KeyboardToggle()
+    toggle = KeyboardToggle(hold_seconds=min(KEYBOARD_TOGGLE_HOLD_S, 0.65))
     ai = AIAssistant()
     semantic_ai = SemanticGestureAI(ai, min_confidence=AI_GESTURE_MIN_CONFIDENCE)
     ai_text = ""
@@ -552,6 +553,7 @@ def run() -> None:
                     ai_text,
                     ai_gesture,
                     ai_confidence,
+                    mouse_locked=processor.mouse_locked,
                 )
 
                 if DEBUG_GESTURES:
