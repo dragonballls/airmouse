@@ -31,6 +31,7 @@ from config import (
     TEXT_INPUT_AUTO_KEYBOARD,
     TEXT_INPUT_DWELL_SECONDS,
     TEXT_INPUT_POLL_SECONDS,
+    TEXT_INPUT_MOVE_TOLERANCE_PX,
     TIMER_RESOLUTION_MS,
 )
 from core.ai_assist import AIAssistant
@@ -338,6 +339,7 @@ def run() -> None:
     text_input = TextInputDetector(
         dwell_seconds=TEXT_INPUT_DWELL_SECONDS,
         poll_seconds=TEXT_INPUT_POLL_SECONDS,
+        move_tolerance_px=TEXT_INPUT_MOVE_TOLERANCE_PX,
     ) if TEXT_INPUT_AUTO_KEYBOARD else None
     typing_owns_lock = False
     typing_reopen_block_until = 0.0
