@@ -27,17 +27,25 @@ import logging
 import os
 import time
 import traceback
+from typing import Optional
 
 import psutil
-
 import cv2
 
-from config import PROCESS_PRIORITY, TIMER_RESOLUTION_MS, DEBUG_GESTURES
+from config import (
+    CAMERA_HEIGHT,
+    CAMERA_WIDTH,
+    DEBUG_GESTURES,
+    PROCESS_PRIORITY,
+    SHOW_CAMERA_UI,
+    TIMER_RESOLUTION_MS,
+)
 from core.camera import AsyncCamera
 from core.tracker import HandTracker
 from core.gestures import GestureOrchestrator
 from core.actuator import MouseActuator
 from core.display import build_virtual_desktop, build_trackpad_zone
+from core.virtual_keyboard import VirtualKeyboard
 
 if DEBUG_GESTURES:
     from core.debug_overlay import draw_debug_frame
@@ -138,11 +146,7 @@ def _restore_windows_settings(original: dict) -> None:
         logger.info("Windows pointer acceleration restored")
 
 
-
 # ── Main Loop ─────────────────────────────────────────────────────────────────
-
-from typing import Optional
-from core.virtual_keyboard import VirtualKeyboard
 
 
 def _finger_up(lms, tip: int, pip: int) -> bool:
@@ -153,59 +157,67 @@ def _keyboard_toggle_pose(lms: Optional[list]) -> bool:
     """Left hand: index+middle+ring up; pinky down; thumb curled."""
     if not lms or len(lms) < 21:
         return False
-    thumb_near = ((lms[4].x-lms[0].x)**2 + (lms[4].y-lms[0].y)**2) ** 0.5 < 0.30
-    return (_finger_up(lms,8,6) and _finger_up(lms,12,10) and
-            _finger_up(lms,16,14) and not _finger_up(lms,20,18) and thumb_near)
+    thumb_near = ((lms[4].x - lms[0].x) ** 2 + (lms[4].y - lms[0].y) ** 2) ** 0.5 < 0.30
+    return (
+        _finger_up(lms, 8, 6)
+        and _finger_up(lms, 12, 10)
+        and _finger_up(lms, 16, 14)
+        and not _finger_up(lms, 20, 18)
+        and thumb_near
+    )
 
 
 class KeyboardToggle:
-    def __init__(self, hold_seconds: float = .75, cooldown_seconds: float = 1.25):
-        self.hold_seconds=hold_seconds
-        self.cooldown_seconds=cooldown_seconds
-        self.started: float|None=None
-        self.last_toggle=-999.0
+    def __init__(self, hold_seconds: float = 0.75, cooldown_seconds: float = 1.25):
+        self.hold_seconds = hold_seconds
+        self.cooldown_seconds = cooldown_seconds
+        self.started: float | None = None
+        self.last_toggle = -999.0
 
     def update(self, lms: Optional[list]) -> bool:
-        now=time.perf_counter()
+        now = time.perf_counter()
         if not _keyboard_toggle_pose(lms):
-            self.started=None
+            self.started = None
             return False
         if self.started is None:
-            self.started=now
+            self.started = now
             return False
-        if now-self.started>=self.hold_seconds and now-self.last_toggle>=self.cooldown_seconds:
-            self.last_toggle=now
-            self.started=None
+        if now - self.started >= self.hold_seconds and now - self.last_toggle >= self.cooldown_seconds:
+            self.last_toggle = now
+            self.started = None
             return True
         return False
 
 
-def _mirror(landmark, width: int, height: int) -> tuple[int,int]:
-    return int((1.0-landmark.x)*width), int(landmark.y*height)
-
-
-def _pinch_distance(a, b) -> float:
-    return ((a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2)**0.5
+def _mirror(landmark, width: int, height: int) -> tuple[int, int]:
+    return int((1.0 - landmark.x) * width), int(landmark.y * height)
 
 
 def _draw_mouse_ui(frame, hands, fps: float) -> None:
-    h,w=frame.shape[:2]
-    if hands.right and len(hands.right)>=9:
-        p=_mirror(hands.right[8],w,h)
-        cv2.drawMarker(frame,p,(0,255,255),cv2.MARKER_CROSS,22,2)
-    cv2.rectangle(frame,(7,7),(w-7,61),(18,18,22),-1)
-    cv2.putText(frame,"AIR MOUSE",(18,34),cv2.FONT_HERSHEY_SIMPLEX,.70,
-                (180,225,255),2,cv2.LINE_AA)
-    cv2.putText(frame,"Left 3-finger hold = virtual keyboard  |  K = toggle  |  Q = quit",
-                (18,54),cv2.FONT_HERSHEY_SIMPLEX,.38,(195,200,208),1,cv2.LINE_AA)
-    cv2.putText(frame,f"{fps:.0f} FPS",(w-86,34),cv2.FONT_HERSHEY_SIMPLEX,.50,
-                (215,220,225),1,cv2.LINE_AA)
+    h, w = frame.shape[:2]
+    if hands.right and len(hands.right) >= 9:
+        p = _mirror(hands.right[8], w, h)
+        cv2.drawMarker(frame, p, (0, 255, 255), cv2.MARKER_CROSS, 22, 2)
+    cv2.rectangle(frame, (7, 7), (w - 7, 61), (18, 18, 22), -1)
+    cv2.putText(
+        frame, "AIR MOUSE", (18, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.70,
+        (180, 225, 255), 2, cv2.LINE_AA
+    )
+    cv2.putText(
+        frame,
+        "Left 3-finger hold = virtual keyboard  |  K = toggle  |  Q = quit",
+        (18, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (195, 200, 208), 1, cv2.LINE_AA
+    )
+    cv2.putText(
+        frame, f"{fps:.0f} FPS", (w - 86, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.50,
+        (215, 220, 225), 1, cv2.LINE_AA
+    )
 
 
 def run() -> None:
-    original_settings={}
-    keyboard=VirtualKeyboard(CAMERA_WIDTH,CAMERA_HEIGHT)
-    toggle=KeyboardToggle()
+    original_settings = {}
+    keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
+    toggle = KeyboardToggle()
 
     def emergency_restore():
         keyboard.close()
@@ -217,77 +229,82 @@ def run() -> None:
     logger.info("=== Unified Airmouse + Virtual Keyboard starting ===")
     original_settings.update(_apply_windows_performance())
 
-    desktop=build_virtual_desktop()
-    trackpad=build_trackpad_zone()
-    actuator=MouseActuator(desktop.total_width,desktop.total_height)
-    processor=GestureOrchestrator(actuator,desktop,trackpad)
+    desktop = build_virtual_desktop()
+    trackpad = build_trackpad_zone()
+    actuator = MouseActuator(desktop.total_width, desktop.total_height)
+    processor = GestureOrchestrator(actuator, desktop, trackpad)
 
-    fps_clock=time.perf_counter()
-    fps_frames=0
-    fps=0.0
-    window="Unified Air Control"
+    fps_clock = time.perf_counter()
+    fps_frames = 0
+    fps = 0.0
+    window = "Unified Air Control"
 
     try:
         with AsyncCamera() as camera, HandTracker() as tracker:
             if SHOW_CAMERA_UI:
-                cv2.namedWindow(window,cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(window,CAMERA_WIDTH,CAMERA_HEIGHT)
+                cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(window, CAMERA_WIDTH, CAMERA_HEIGHT)
 
             while True:
-                frame=camera.read()
+                frame = camera.read()
                 if frame is None:
-                    time.sleep(.002)
+                    time.sleep(0.002)
                     continue
 
-                hands=tracker.process(frame)
+                hands = tracker.process(frame)
 
                 if toggle.update(hands.left):
                     keyboard.toggle()
                     processor.reset()
-                    logger.info("Virtual keyboard %s","enabled" if keyboard.visible else "disabled")
+                    logger.info(
+                        "Virtual keyboard %s",
+                        "enabled" if keyboard.visible else "disabled",
+                    )
 
                 if keyboard.visible:
-                    active=hands.right or hands.left
-                    display=cv2.flip(frame,1)
-                    if active and len(active)>=21:
-                        ix,iy=_mirror(active[8],frame.shape[1],frame.shape[0])
-                        tx,ty=_mirror(active[4],frame.shape[1],frame.shape[0])
-                        keyboard.update_hover(ix,iy)
-                        keyboard.handle_pinch_type((tx,ty),(ix,iy))
-                        keyboard.draw(display,finger_pos=(ix,iy))
+                    active = hands.right or hands.left
+                    display = cv2.flip(frame, 1)
+                    if active and len(active) >= 21:
+                        ix, iy = _mirror(active[8], frame.shape[1], frame.shape[0])
+                        tx, ty = _mirror(active[4], frame.shape[1], frame.shape[0])
+                        keyboard.update_hover(ix, iy)
+                        keyboard.handle_pinch_type((tx, ty), (ix, iy))
+                        keyboard.update_gesture((ix, iy))
+                        keyboard.draw(display, finger_pos=(ix, iy))
                     else:
-                        keyboard.update_hover(-1,-1)
+                        keyboard.update_hover(-1, -1)
                         keyboard.update_gesture(None)
-                        keyboard.draw(display,finger_pos=None)
-                    frame=display
+                        keyboard.draw(display, finger_pos=None)
+                    frame = display
                 else:
                     processor.process(hands)
-                    frame=cv2.flip(frame,1)
-                    _draw_mouse_ui(frame,hands,fps)
+                    frame = cv2.flip(frame, 1)
+                    _draw_mouse_ui(frame, hands, fps)
 
-                fps_frames+=1
-                now=time.perf_counter()
-                elapsed=now-fps_clock
-                if elapsed>=1.0:
-                    fps=fps_frames/elapsed
-                    fps_frames=0
-                    fps_clock=now
+                fps_frames += 1
+                now = time.perf_counter()
+                elapsed = now - fps_clock
+                if elapsed >= 1.0:
+                    fps = fps_frames / elapsed
+                    fps_frames = 0
+                    fps_clock = now
 
                 if DEBUG_GESTURES:
-                    cv2.imshow("AirMouse Debug",draw_debug_frame(frame,hands,processor.right_state))
+                    cv2.imshow("AirMouse Debug", draw_debug_frame(frame, hands, processor.right_state))
 
                 if SHOW_CAMERA_UI:
-                    cv2.imshow(window,frame)
-                    key=cv2.waitKey(1)&0xFF
-                    if key in (ord("q"),ord("Q")):
+                    cv2.imshow(window, frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key in (ord("q"), ord("Q")):
                         break
-                    if key in (ord("k"),ord("K")):
+                    if key in (ord("k"), ord("K")):
                         keyboard.toggle()
+                        processor.reset()
 
     except KeyboardInterrupt:
         logger.info("Ctrl+C received — shutting down cleanly")
     except Exception:
-        logger.error("Unhandled exception:\n%s",traceback.format_exc())
+        logger.error("Unhandled exception:\n%s", traceback.format_exc())
         raise
     finally:
         if actuator.is_dragging:
@@ -300,5 +317,5 @@ def run() -> None:
         logger.info("=== Unified Airmouse + Virtual Keyboard stopped ===")
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     run()
