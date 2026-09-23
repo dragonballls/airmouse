@@ -103,6 +103,7 @@ class TypingKeyboardOverlay:
         self._anchor = anchor
         self._desktop = desktop
         self.visible = True
+        self.keyboard.set_visible(True)
         canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(self.window_name, self.width, self.height)
