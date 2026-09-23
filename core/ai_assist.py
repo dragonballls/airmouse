@@ -88,7 +88,7 @@ class AIAssistant:
 
         image = frame
         height, width = image.shape[:2]
-        max_width = 768
+        max_width = 640
         if width > max_width:
             scale = max_width / width
             image = cv2.resize(
@@ -192,6 +192,10 @@ class AIAssistant:
             config=self._types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=schema,
+                media_resolution=self._types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                thinking_config=self._types.ThinkingConfig(
+                    thinking_level="minimal"
+                ),
             ),
         )
 
