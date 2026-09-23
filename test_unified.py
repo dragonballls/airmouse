@@ -1,4 +1,4 @@
-"""CI-safe tests for the unified keyboard/control integration."""
+"""CI-safe tests for the unified keyboard/control integration.""
 
 from unittest.mock import Mock
 
@@ -99,8 +99,10 @@ def test_orchestrator_handles_empty_and_dual_hand_input():
     processor.reset()
 
 
-def test_ai_assistant_is_optional_without_a_key(monkeypatch):
+def test_ai_assistant_is_optional_without_any_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     from core.ai_assist import AIAssistant
     assistant = AIAssistant()
     assert assistant.enabled is False
