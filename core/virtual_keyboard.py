@@ -20,11 +20,12 @@ from core.keyboard_utils import pinch_distance
 
 # QWERTY layout: each row is a list of key labels
 QWERTY_LAYOUT = [
-    list("1234567890-=") + ["BKSP"],
-    ["TAB"] + list("QWERTYUIOP") + ["[", "]", "\\"],
-    ["CAPS"] + list("ASDFGHJKL") + [";", "'", "ENTER"],
-    ["SHIFT"] + list("ZXCVBNM") + [",", ".", "/"] + ["SHIFT"],
-    ["CTRL", "ALT", "WIN", "LEFT", "DOWN", "UP", "RIGHT"],
+    ["ESC","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"],
+    ["GRAVE","1","2","3","4","5","6","7","8","9","0","-","=","BACKSPACE"],
+    ["TAB","Q","W","E","R","T","Y","U","I","O","P","[","]","BACKSLASH"],
+    ["CAPS","A","S","D","F","G","H","J","K","L",";","'","ENTER"],
+    ["SHIFT","Z","X","C","V","B","N","M",",",".","/","SHIFT"],
+    ["CTRL","ALT","WIN","SPACE","LEFT","DOWN","UP","RIGHT"],
 ]
 
 
@@ -125,25 +126,25 @@ class VirtualKeyboard:
         self.set_visible(False)
 
     def _build_layout(self) -> list[KeyButton]:
-        """Create KeyButton objects from the QWERTY layout with computed positions."""
+        """Create a complete practical keyboard with compact proportional keys."""
         keys: list[KeyButton] = []
-        keyboard_height = len(QWERTY_LAYOUT) * (self.key_height + self.key_margin) + self.key_height
-        start_y = self.frame_height - keyboard_height - 20
-
+        top = max(40, self.frame_height - 6 * (self.key_height + self.key_margin) - 24)
+        special = {"ESC":58,"BACKSPACE":122,"TAB":82,"CAPS":94,"ENTER":112,
+                   "SHIFT":110,"CTRL":78,"ALT":78,"WIN":78,"SPACE":320,
+                   "LEFT":62,"DOWN":62,"UP":62,"RIGHT":62}
+        for n in range(1,13): special[f"F{n}"] = 58
         for row_idx, row in enumerate(QWERTY_LAYOUT):
-            row_width = len(row) * self.key_width + (len(row) - 1) * self.key_margin
-            start_x = (self.frame_width - row_width) // 2
-            y = start_y + row_idx * (self.key_height + self.key_margin)
-
-            for col_idx, label in enumerate(row):
-                x = start_x + col_idx * (self.key_width + self.key_margin)
-                keys.append(KeyButton(label=label, x=x, y=y, width=self.key_width, height=self.key_height))
-
-        space_width = min(self.frame_width - 80, 420)
-        space_x = (self.frame_width - space_width) // 2
-        space_y = start_y + len(QWERTY_LAYOUT) * (self.key_height + self.key_margin)
-        keys.append(KeyButton(label="SPACE", x=space_x, y=space_y, width=space_width, height=self.key_height))
-
+            y = top + row_idx * (self.key_height + self.key_margin)
+            widths = [special.get(label, self.key_width) for label in row]
+            total = sum(widths) + self.key_margin * (len(row) - 1)
+            scale = min(1.0, (self.frame_width - 18) / max(total, 1))
+            scaled_gap = self.key_margin * scale
+            row_total = sum(int(w * scale) for w in widths) + int(scaled_gap) * (len(row) - 1)
+            x = max(9, (self.frame_width - row_total) // 2)
+            for label, width in zip(row, widths):
+                w = max(28, int(width * scale))
+                keys.append(KeyButton(label=label, x=x, y=y, width=w, height=self.key_height))
+                x += w + int(scaled_gap)
         return keys
 
     def get_key_at(self, px: int, py: int) -> KeyButton | None:
@@ -221,48 +222,31 @@ class VirtualKeyboard:
         return " " if label == "SPACE" else label.lower()
 
     def _type_key(self, label: str, current_time: float) -> bool:
-        """Send a real Windows key event and update visual typing feedback."""
-        modifier_map = {
-            "SHIFT": "shift",
-            "CTRL": "ctrl",
-            "ALT": "alt",
-            "WIN": "winleft",
-        }
-        special_map = {
-            "BKSP": "backspace",
-            "ENTER": "enter",
-            "TAB": "tab",
-            "CAPS": "capslock",
-            "ESC": "esc",
-            "LEFT": "left",
-            "RIGHT": "right",
-            "UP": "up",
-            "DOWN": "down",
-        }
-
+        """Send a Windows key event; modifiers stay held until pressed again."""
+        modifier_map = {"SHIFT":"shift","CTRL":"ctrl","ALT":"alt","WIN":"winleft"}
+        special_map = {"GRAVE":"`","BACKSLASH":"\\","ESC":"esc","BACKSPACE":"backspace",
+                       "TAB":"tab","CAPS":"capslock","ENTER":"enter","LEFT":"left",
+                       "RIGHT":"right","UP":"up","DOWN":"down"}
         if label in modifier_map:
-            modifier = modifier_map[label]
-            if modifier in self._held_modifiers:
-                pyautogui.keyUp(modifier)
-                self._held_modifiers.remove(modifier)
+            mod = modifier_map[label]
+            if mod in self._held_modifiers:
+                pyautogui.keyUp(mod); self._held_modifiers.remove(mod)
             else:
-                pyautogui.keyDown(modifier)
-                self._held_modifiers.add(modifier)
-            char = ""
+                pyautogui.keyDown(mod); self._held_modifiers.add(mod)
         elif label in special_map:
-            pyautogui.press(special_map[label])
-            if label == "BKSP":
-                self.last_typed = self.last_typed[:-1]
-            elif label == "ENTER":
-                self.last_typed += "\n"
-            elif label == "CAPS":
-                pass
-            char = ""
+            key = special_map[label]
+            if label in ("GRAVE","BACKSLASH"): pyautogui.write(key, interval=0)
+            else: pyautogui.press(key)
+            if label == "BACKSPACE": self.last_typed = self.last_typed[:-1]
+            elif label == "ENTER": self.last_typed += "\n"
+            elif label == "GRAVE": self.last_typed += "`"
+            elif label == "BACKSLASH": self.last_typed += "\\"
+        elif label.startswith("F") and label[1:].isdigit():
+            pyautogui.press(label.lower())
         else:
             char = self._key_to_char(label)
             pyautogui.write(char, interval=0)
             self.last_typed += char
-
         self.last_pressed_label = label
         self.press_feedback_until = current_time + 0.35
         self.press_anim_start = current_time
