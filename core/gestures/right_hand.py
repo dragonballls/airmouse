@@ -32,7 +32,7 @@ from config import (
 from core.actuator import MouseActuator
 from core.display import TrackpadZone, VirtualDesktop, map_to_desktop
 from core.filter import OneEuroFilter
-from core.gestures.utils import is_peace_sign, normalized_distance
+from core.gestures.utils import is_fist, is_peace_sign, normalized_distance
 from core.tracker import Landmark
 
 logger = logging.getLogger(__name__)
