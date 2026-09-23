@@ -1,14 +1,13 @@
 """AI semantic gesture classification for the live air-mouse pipeline.
 
 The local tracker remains responsible for low-latency landmarks and pointer
-movement. Gemini is used to classify deliberate gesture candidates into a small,
-closed set of safe semantic labels. AI output never contains OS commands.
+movement. Gemini classifies deliberate candidates into a small, closed set of
+safe semantic labels. AI output never contains OS commands.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 import threading
 import time
 from typing import Any
@@ -25,6 +24,7 @@ GESTURE_LABELS = frozenset(
         "zoom_in",
         "zoom_out",
         "keyboard_toggle",
+        "keyboard_type",
         "unknown",
     }
 )
@@ -79,6 +79,7 @@ class SemanticGestureAI:
         with self._lock:
             self._decision = None
             self._last_submitted_candidate = ""
+            self._last_request_at = 0.0
 
     def submit(
         self,
@@ -138,9 +139,7 @@ class SemanticGestureAI:
     ) -> GestureDecision | None:
         with self._lock:
             decision = self._decision
-        if decision is None:
-            return None
-        if decision.candidate != candidate:
+        if decision is None or decision.candidate != candidate:
             return None
         if time.perf_counter() - decision.created_at > max_age:
             return None
