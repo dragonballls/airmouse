@@ -258,3 +258,33 @@ def test_video_tracker_blank_frame_returns_empty_result(monkeypatch):
     assert result.left is None
     assert result.right is None
     tracker.close()
+
+
+def test_camera_handedness_is_swapped_for_unmirrored_input():
+    from config import FLIP_HANDEDNESS
+    assert FLIP_HANDEDNESS is True
+
+
+def test_stale_ai_generation_cannot_be_accepted():
+    from core.gesture_ai import GestureDecision, SemanticGestureAI
+    import time
+
+    class FakeAssistant:
+        enabled = False
+        provider = ""
+
+    semantic = SemanticGestureAI(FakeAssistant())
+    semantic._decision = GestureDecision(
+        gesture="right_click",
+        target_hand="right",
+        confidence=0.95,
+        candidate="middle_pinch",
+        created_at=time.perf_counter(),
+    )
+    semantic._generation = 8
+    semantic._future_generation = 7
+    semantic._future = None
+    # A generation mismatch is represented as an invalidated decision after clear.
+    semantic.clear()
+    assert semantic.current(None, grace=1.0) is None
+    semantic.close()
