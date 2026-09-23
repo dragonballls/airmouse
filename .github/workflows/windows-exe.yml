@@ -1,0 +1,95 @@
+name: Windows EXE + 26 Minute Verification
+
+on:
+  push:
+    branches:
+      - feat/reliable-two-hand-ai
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exe-verified:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONUNBUFFERED: "1"
+      AIRMOUSE_ENABLE_GESTURE_AI: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install "pyinstaller>=6.10,<7" "pytest>=8,<9"
+
+      - name: Provision MediaPipe model
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force models | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" -OutFile "models/hand_landmarker.task"
+          $size=(Get-Item "models/hand_landmarker.task").Length
+          Write-Host "MediaPipe model size: $size bytes"
+          if ($size -lt 100000) { throw "MediaPipe model download is unexpectedly small." }
+
+      - name: Static Python verification
+        shell: pwsh
+        run: |
+          python -m compileall -q main.py config.py core ci
+          python -m pytest -q test_unified.py
+
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force dist, build -ErrorAction SilentlyContinue
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name Airmouse --add-data "models/hand_landmarker.task;models" --collect-all mediapipe --collect-all pywinauto --collect-submodules pynput --hidden-import comtypes --hidden-import pywin32_system32 --hidden-import google.genai --hidden-import google.genai.types --hidden-import openai --hidden-import typesafe_sdk main.py
+          if (!(Test-Path "dist/Airmouse.exe")) { throw "PyInstaller did not produce dist/Airmouse.exe" }
+          $size=(Get-Item "dist/Airmouse.exe").Length
+          Write-Host "Airmouse.exe size: $size bytes"
+          if ($size -lt 10000000) { throw "EXE is implausibly small; packaging likely missed dependencies." }
+
+      - name: Packaged EXE self-test
+        shell: pwsh
+        run: |
+          & ".\dist\Airmouse.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Packaged EXE self-test failed with exit code $LASTEXITCODE" }
+
+      - name: Mandatory 26-minute runtime soak
+        shell: pwsh
+        run: |
+          python ci/soak_test.py --minutes 26
+
+      - name: Package verified artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item "dist/Airmouse.exe" "release/Airmouse-Windows-x64-verified.exe"
+          @"
+          Repository: dragonballls/airmouse
+          Commit: $env:GITHUB_SHA
+          Verification: Windows-latest
+          Static compile: PASS
+          Unified tests: PASS
+          Packaged EXE self-test: PASS
+          Runtime soak: PASS (>=26 minutes)
+          "@ | Set-Content -Encoding UTF8 "release/VERIFICATION.txt"
+
+      - name: Upload verified EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Airmouse-Windows-x64-verified
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
