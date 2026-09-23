@@ -211,6 +211,18 @@ class SemanticGestureAI:
         if gesture not in GESTURE_LABELS:
             gesture = "unknown"
 
+        candidate_allowed = {
+            "index_pinch": {"left_click", "drag", "unknown", "none"},
+            "middle_pinch": {"right_click", "unknown", "none"},
+            "scroll_sign": {"scroll_up", "scroll_down", "unknown", "none"},
+            "two_hand_pinch": {"zoom_in", "zoom_out", "unknown", "none"},
+            "keyboard_toggle": {"keyboard_toggle", "unknown", "none"},
+            "keyboard_type": {"keyboard_type", "unknown", "none"},
+        }
+        allowed_for_candidate = candidate_allowed.get(candidate)
+        if allowed_for_candidate is not None and gesture not in allowed_for_candidate:
+            gesture = "unknown"
+
         target_hand = str(result.get("target_hand", "unknown")).strip().lower()
         if target_hand not in {"left", "right", "both", "none", "unknown"}:
             target_hand = "unknown"
