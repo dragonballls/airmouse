@@ -556,7 +556,8 @@ def run() -> None:
                             1,
                             cv2.LINE_AA,
                         )
-                    _draw_hand_overlay(display, active)
+                    _draw_hand_overlay(display, hands.left)
+                    _draw_hand_overlay(display, hands.right)
                     if active and len(active) >= 21:
                         ix, iy = _mirror(active[8], frame.shape[1], frame.shape[0])
                         tx, ty = _mirror(active[4], frame.shape[1], frame.shape[0])
