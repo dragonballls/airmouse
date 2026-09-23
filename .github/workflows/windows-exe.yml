@@ -63,8 +63,14 @@ jobs:
       - name: Packaged EXE self-test
         shell: pwsh
         run: |
-          & ".\dist\Airmouse.exe" --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Packaged EXE self-test failed with exit code $LASTEXITCODE" }
+          $resultPath = Join-Path $PWD "release-self-test.txt"
+          Remove-Item $resultPath -Force -ErrorAction SilentlyContinue
+          $env:AIRMOUSE_SELF_TEST_RESULT = $resultPath
+          $p = Start-Process -FilePath ".\dist\Airmouse.exe" -ArgumentList "--self-test" -WorkingDirectory $PWD -Wait -PassThru -WindowStyle Hidden
+          Write-Host "Packaged self-test exit code: $($p.ExitCode)"
+          if (Test-Path $resultPath) { Get-Content $resultPath }
+          if ($p.ExitCode -ne 0) { throw "Packaged EXE self-test failed with exit code $($p.ExitCode)" }
+          if (!(Test-Path $resultPath) -or -not ((Get-Content $resultPath -Raw) -match "AIRMOUSE SELF-TEST PASS")) { throw "Packaged EXE did not produce a PASS result file." }
 
       - name: Mandatory 26-minute runtime soak
         shell: pwsh
