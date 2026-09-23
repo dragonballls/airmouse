@@ -28,6 +28,9 @@ from config import (
     AI_GESTURE_GRACE_S,
     THUMB_INDEX_CLICK_DIST,
     SHOW_CAMERA_UI,
+    TEXT_INPUT_AUTO_KEYBOARD,
+    TEXT_INPUT_DWELL_SECONDS,
+    TEXT_INPUT_POLL_SECONDS,
     TIMER_RESOLUTION_MS,
 )
 from core.ai_assist import AIAssistant
@@ -43,6 +46,8 @@ from core.gestures.utils import (
 )
 from core.tracker import HandTracker
 from core.virtual_keyboard import VirtualKeyboard
+from core.text_input import TextInputDetector
+from core.typing_overlay import TypingKeyboardOverlay
 
 if DEBUG_GESTURES:
     from core.debug_overlay import draw_debug_frame
@@ -327,8 +332,15 @@ def _draw_status(
 
 def run() -> None:
     original_settings: dict = {}
-    keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
+    typing_overlay = TypingKeyboardOverlay()
+    keyboard = typing_overlay.keyboard
     toggle = KeyboardToggle(hold_seconds=min(KEYBOARD_TOGGLE_HOLD_S, 0.65))
+    text_input = TextInputDetector(
+        dwell_seconds=TEXT_INPUT_DWELL_SECONDS,
+        poll_seconds=TEXT_INPUT_POLL_SECONDS,
+    ) if TEXT_INPUT_AUTO_KEYBOARD else None
+    typing_owns_lock = False
+    typing_reopen_block_until = 0.0
     ai = AIAssistant()
     semantic_ai = SemanticGestureAI(ai, min_confidence=AI_GESTURE_MIN_CONFIDENCE)
     ai_text = ""
