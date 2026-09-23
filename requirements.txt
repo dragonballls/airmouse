@@ -8,3 +8,4 @@ psutil>=6.0
 openai>=1.0
 google-genai>=1.0
 typesafe-sdk==0.7.1
+pywinauto>=0.6.9
