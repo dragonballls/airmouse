@@ -351,9 +351,36 @@ def run() -> None:
     pinch_candidate_started: float | None = None
     previous_candidate: str | None = None
 
+    def enter_typing(anchor: tuple[int, int], focus_field: bool = True) -> None:
+        nonlocal typing_owns_lock
+        if keyboard.visible:
+            return
+        if focus_field:
+            # Re-focus the edit control without activating the keyboard window.
+            actuator.left_click()
+        if not actuator.cursor_locked:
+            actuator.lock_cursor()
+            typing_owns_lock = True
+        typing_overlay.show(anchor, desktop)
+        if text_input is not None:
+            text_input.reset()
+
+    def exit_typing() -> None:
+        nonlocal typing_owns_lock, typing_reopen_block_until
+        typing_overlay.hide()
+        if typing_owns_lock and actuator.cursor_locked:
+            actuator.unlock_cursor()
+        typing_owns_lock = False
+        typing_reopen_block_until = time.perf_counter() + 1.5
+        if text_input is not None:
+            text_input.reset()
+
     def emergency_restore():
         semantic_ai.close()
-        keyboard.close()
+        if keyboard.visible:
+            exit_typing()
+        else:
+            typing_overlay.hide()
         if original_settings:
             _restore_windows_settings(original_settings)
 
