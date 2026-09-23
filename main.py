@@ -219,6 +219,36 @@ def _gesture_candidate(
 
     return None, "No deliberate gesture candidate."
 
+def _ai_frame_crop(frame, hands) :
+    """Crop the AI input around visible hands while retaining generous context."""
+    if frame is None or not getattr(frame, "size", 0):
+        return frame
+    landmarks = []
+    for hand in (getattr(hands, "left", None), getattr(hands, "right", None)):
+        if hand and len(hand) >= 21:
+            landmarks.extend(hand)
+
+    if not landmarks:
+        return frame
+
+    height, width = frame.shape[:2]
+    xs = [max(0.0, min(1.0, lm.x)) for lm in landmarks]
+    ys = [max(0.0, min(1.0, lm.y)) for lm in landmarks]
+    x0 = int(min(xs) * width)
+    x1 = int(max(xs) * width)
+    y0 = int(min(ys) * height)
+    y1 = int(max(ys) * height)
+
+    pad_x = max(40, int((x1 - x0) * 0.45))
+    pad_y = max(40, int((y1 - y0) * 0.45))
+    x0 = max(0, x0 - pad_x)
+    y0 = max(0, y0 - pad_y)
+    x1 = min(width, x1 + pad_x)
+    y1 = min(height, y1 + pad_y)
+
+    crop = frame[y0:y1, x0:x1]
+    return crop if crop.size else frame
+
 def _mirror(landmark, width: int, height: int) -> tuple[int, int]:
     return int((1.0 - landmark.x) * width), int(landmark.y * height)
 
@@ -403,7 +433,7 @@ def run() -> None:
                     hands_hint += f" Current frame-to-frame wrist dy={wrist_dy:.4f}."
 
                 semantic_ai.submit(
-                    frame,
+                    _ai_frame_crop(frame, hands),
                     candidate or "",
                     "keyboard" if keyboard.visible else "mouse",
                     hands_hint,
