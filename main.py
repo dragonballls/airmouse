@@ -655,7 +655,10 @@ def run() -> None:
     finally:
         if actuator.is_dragging:
             actuator.drag_end()
-        typing_overlay.hide()
+        if keyboard.visible:
+            exit_typing()
+        else:
+            typing_overlay.hide()
         if SHOW_CAMERA_UI or DEBUG_GESTURES:
             cv2.destroyAllWindows()
         _restore_windows_settings(original_settings)
