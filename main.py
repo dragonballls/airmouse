@@ -25,8 +25,10 @@ import atexit
 import ctypes
 import logging
 import os
+import sys
 import time
 import traceback
+from pathlib import Path
 from typing import Optional
 
 import psutil
@@ -52,11 +54,23 @@ if DEBUG_GESTURES:
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+if getattr(sys, "frozen", False):
+    _log_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Airmouse"
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt="%H:%M:%S",
+        handlers=[logging.FileHandler(_log_dir / "airmouse.log", encoding="utf-8")],
+    )
+else:
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt="%H:%M:%S",
+    )
 logger = logging.getLogger("airmouse.main")
 
 
