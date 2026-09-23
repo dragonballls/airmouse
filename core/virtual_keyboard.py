@@ -20,9 +20,11 @@ from core.keyboard_utils import pinch_distance
 
 # QWERTY layout: each row is a list of key labels
 QWERTY_LAYOUT = [
-    list("QWERTYUIOP"),
-    list("ASDFGHJKL"),
-    list("ZXCVBNM"),
+    list("1234567890-=") + ["BKSP"],
+    ["TAB"] + list("QWERTYUIOP") + ["[", "]", "\\"],
+    ["CAPS"] + list("ASDFGHJKL") + [";", "'", "ENTER"],
+    ["SHIFT"] + list("ZXCVBNM") + [",", ".", "/"] + ["SHIFT"],
+    ["CTRL", "ALT", "WIN", "LEFT", "DOWN", "UP", "RIGHT"],
 ]
 
 
@@ -68,6 +70,7 @@ class VirtualKeyboard:
         self.frame_height = frame_height
         self.visible = False
         self.key_width = key_width
+        self._held_modifiers: set[str] = set()
         self.key_height = key_height
         self.key_margin = key_margin
         self.keys: list[KeyButton] = self._build_layout()
@@ -109,6 +112,9 @@ class VirtualKeyboard:
         if not visible:
             self.is_pinching = False
             self._pinch_active_key = None
+            for modifier in tuple(self._held_modifiers):
+                pyautogui.keyUp(modifier)
+            self._held_modifiers.clear()
 
     def toggle(self) -> bool:
         self.set_visible(not self.visible)
@@ -214,14 +220,53 @@ class VirtualKeyboard:
         return " " if label == "SPACE" else label.lower()
 
     def _type_key(self, label: str, current_time: float) -> bool:
-        """Send a key press and update visual feedback state."""
-        char = self._key_to_char(label)
-        pyautogui.write(char, interval=0)
+        """Send a real Windows key event and update visual typing feedback."""
+        modifier_map = {
+            "SHIFT": "shift",
+            "CTRL": "ctrl",
+            "ALT": "alt",
+            "WIN": "winleft",
+        }
+        special_map = {
+            "BKSP": "backspace",
+            "ENTER": "enter",
+            "TAB": "tab",
+            "CAPS": "capslock",
+            "ESC": "esc",
+            "LEFT": "left",
+            "RIGHT": "right",
+            "UP": "up",
+            "DOWN": "down",
+        }
+
+        if label in modifier_map:
+            modifier = modifier_map[label]
+            if modifier in self._held_modifiers:
+                pyautogui.keyUp(modifier)
+                self._held_modifiers.remove(modifier)
+            else:
+                pyautogui.keyDown(modifier)
+                self._held_modifiers.add(modifier)
+            char = ""
+        elif label in special_map:
+            pyautogui.press(special_map[label])
+            if label == "BKSP":
+                self.last_typed = self.last_typed[:-1]
+            elif label == "ENTER":
+                self.last_typed += "\n"
+            elif label == "CAPS":
+                pass
+            char = ""
+        else:
+            char = self._key_to_char(label)
+            pyautogui.write(char, interval=0)
+            self.last_typed += char
+
         self.last_pressed_label = label
         self.press_feedback_until = current_time + 0.35
         self.press_anim_start = current_time
         self.last_press_time = current_time
-        self.last_typed += char
+        self.last_typed = self.last_typed[-100:]
         return True
 
     def handle_pinch_type(
@@ -329,6 +374,9 @@ class VirtualKeyboard:
 
     def draw(self, frame: np.ndarray, finger_pos: tuple[int, int] | None = None) -> np.ndarray:
         """Draw the QWERTY keyboard overlay directly on the frame."""
+        if not self.visible:
+            return frame
+
         draw_typed_preview(frame, self.last_typed, y_offset=200)
         now = time.time()
 
