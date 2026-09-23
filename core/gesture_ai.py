@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any
 
+from config import AI_REQUEST_INTERVAL_S
+
 
 GESTURE_LABELS = frozenset(
     {
@@ -108,7 +110,7 @@ class SemanticGestureAI:
         with self._lock:
             if (
                 candidate == self._last_submitted_candidate
-                and now - self._last_request_at < 0.45
+                and now - self._last_request_at < AI_REQUEST_INTERVAL_S
             ):
                 return
             if self._future is not None and not self._future.done():
