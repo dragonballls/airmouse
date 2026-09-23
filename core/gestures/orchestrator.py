@@ -14,6 +14,7 @@ from core.actuator import MouseActuator
 from core.gestures.right_hand import RightHandProcessor
 from core.gestures.left_hand import LeftHandProcessor
 from core.gestures.two_hand import TwoHandProcessor
+from config import SAFE_DUAL_HAND_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,23 @@ class GestureOrchestrator:
 
     def process(self, hands: HandsResult) -> None:
         """Process one frame. Call once per frame regardless of hand visibility."""
+        both_hands = hands.left is not None and hands.right is not None
         self._right.process(hands.right)
+
+        if both_hands and SAFE_DUAL_HAND_MODE:
+            # Safe mode: the right hand remains the mouse, while the left hand
+            # cannot emit Windows shortcuts or modifier keys when both hands
+            # are visible. This keeps ordinary two-hand positioning harmless.
+            self._left.process(None)
+            self._two.reset()
+            return
 
         if hands.left is not None:
             self._left.process(hands.left)
         else:
             self._left.process(None)
 
-        if hands.left is not None and hands.right is not None:
+        if both_hands:
             self._two.process(hands.left, hands.right)
 
     def reset(self) -> None:
