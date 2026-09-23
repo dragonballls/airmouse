@@ -16,6 +16,7 @@ from config import (
     CAMERA_FPS,
     DOUBLE_CLICK_WINDOW_S,
     DRAG_HOLD_SECONDS,
+    DRAG_MOVE_THRESHOLD,
     GESTURE_COOLDOWN_SECONDS,
     GESTURE_RELEASE_FRAMES,
     GESTURE_STABILITY_FRAMES,
@@ -71,6 +72,8 @@ class RightHandProcessor:
         self._state = _State.IDLE
 
         self._pinch_start_time: float | None = None
+        self._pinch_start_x: float | None = None
+        self._pinch_start_y: float | None = None
         self._last_click_time = 0.0
         self._last_action_time = 0.0
         self._last_scroll_time = 0.0
@@ -107,6 +110,8 @@ class RightHandProcessor:
             self._actuator.drag_end()
         self._state = _State.IDLE
         self._pinch_start_time = None
+        self._pinch_start_x = None
+        self._pinch_start_y = None
         self._prev_wrist_y = None
         self._last_frame_time = None
         self._index_pinch_gate.reset()
@@ -170,6 +175,8 @@ class RightHandProcessor:
             elif index_stable:
                 self._state = _State.LEFT_PINCH_PENDING_DRAG
                 self._pinch_start_time = now
+                self._pinch_start_x = landmarks[8].x
+                self._pinch_start_y = landmarks[8].y
                 self._index_release_gate.reset()
 
         elif self._state == _State.RIGHT_PINCH:
@@ -201,14 +208,23 @@ class RightHandProcessor:
                     self._last_action_time = now
                 self._state = _State.IDLE
                 self._pinch_start_time = None
+                self._pinch_start_x = None
+                self._pinch_start_y = None
                 self._index_release_gate.reset()
                 self._index_pinch_gate.reset()
-            elif (
-                self._pinch_start_time is not None
-                and now - self._pinch_start_time >= DRAG_HOLD_SECONDS
-            ):
-                self._actuator.drag_start()
-                self._state = _State.DRAGGING
+            elif self._pinch_start_time is not None:
+                held = now - self._pinch_start_time
+                moved = 0.0
+                if self._pinch_start_x is not None and self._pinch_start_y is not None:
+                    dx = landmarks[8].x - self._pinch_start_x
+                    dy = landmarks[8].y - self._pinch_start_y
+                    moved = (dx * dx + dy * dy) ** 0.5
+
+                # A deliberate pinch followed by clear fingertip motion starts
+                # selection immediately; otherwise the short hold timer starts it.
+                if held >= DRAG_HOLD_SECONDS or moved >= DRAG_MOVE_THRESHOLD:
+                    self._actuator.drag_start()
+                    self._state = _State.DRAGGING
 
         elif self._state == _State.DRAGGING:
             if self._index_release_gate.update(index_released):
