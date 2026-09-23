@@ -42,6 +42,7 @@ from config import (
     ONE_EURO_BETA,
     ONE_EURO_DCUTOFF,
     PINCH_RELEASE_HYSTERESIS,
+    RIGHT_CLICK_MIN_HOLD,
 )
 from core.tracker import Landmark
 from core.filter import OneEuroFilter
@@ -80,6 +81,7 @@ class RightHandProcessor:
         self._pinch_start_time: float | None = None
         self._left_pinch_active = False
         self._right_click_active = False
+        self._right_click_started: float | None = None
         self._last_click_time: float = 0.0
         self._last_gesture_time: float = 0.0
         self._last_scroll_time: float = 0.0
@@ -107,6 +109,7 @@ class RightHandProcessor:
             self._pinch_start_time = None
             self._left_pinch_active = False
             self._right_click_active = False
+            self._right_click_started = None
             self._prev_wrist_y = None
             self._last_frame_time = None
             return
@@ -174,15 +177,28 @@ class RightHandProcessor:
 
         # ── Right click ───────────────────────────────────────────────────────
         if self._state == _State.IDLE:
-            if thumb_mid_pinch and not self._right_click_active:
+            if (
+                thumb_mid_pinch
+                and not thumb_idx_pinch
+                and not self._right_click_active
+            ):
                 self._right_click_active = True
-                self._last_gesture_time = now
+                self._right_click_started = now
                 return
             if self._right_click_active and not thumb_mid_pinch:
-                if (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS:
+                held = (
+                    now - self._right_click_started
+                    if self._right_click_started is not None
+                    else 0.0
+                )
+                if (
+                    held >= RIGHT_CLICK_MIN_HOLD
+                    and (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS
+                ):
                     self._actuator.right_click()
                     self._last_gesture_time = now
                 self._right_click_active = False
+                self._right_click_started = None
                 return
 
         # ── Left click / drag state machine ───────────────────────────────────
