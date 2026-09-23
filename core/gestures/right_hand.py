@@ -41,6 +41,7 @@ from config import (
     ONE_EURO_MINCUTOFF,
     ONE_EURO_BETA,
     ONE_EURO_DCUTOFF,
+    PINCH_RELEASE_HYSTERESIS,
 )
 from core.tracker import Landmark
 from core.filter import OneEuroFilter
@@ -77,6 +78,8 @@ class RightHandProcessor:
         self._trackpad = trackpad
         self._state = _State.IDLE
         self._pinch_start_time: float | None = None
+        self._left_pinch_active = False
+        self._right_click_active = False
         self._last_click_time: float = 0.0
         self._last_gesture_time: float = 0.0
         self._last_scroll_time: float = 0.0
@@ -102,6 +105,8 @@ class RightHandProcessor:
                 self._actuator.drag_end()
             self._state = _State.IDLE
             self._pinch_start_time = None
+            self._left_pinch_active = False
+            self._right_click_active = False
             self._prev_wrist_y = None
             self._last_frame_time = None
             return
@@ -124,7 +129,13 @@ class RightHandProcessor:
         peace = is_peace_sign(landmarks)
         d_thumb_idx = dist3d(landmarks[4], landmarks[8])
         d_thumb_mid = dist3d(landmarks[4], landmarks[12])
-        thumb_idx_pinch = d_thumb_idx < THUMB_INDEX_CLICK_DIST
+        palm_scale = max(dist3d(landmarks[0], landmarks[9]), 1e-4)
+        idx_start = max(THUMB_INDEX_CLICK_DIST * 0.75, palm_scale * 0.50)
+        mid_start = max(THUMB_MIDDLE_CLICK_DIST * 0.75, palm_scale * 0.52)
+        idx_release = idx_start * PINCH_RELEASE_HYSTERESIS
+        mid_release = mid_start * PINCH_RELEASE_HYSTERESIS
+        thumb_idx_pinch = d_thumb_idx <= (idx_release if self._left_pinch_active else idx_start)
+        thumb_mid_pinch = d_thumb_mid <= (mid_release if self._right_click_active else mid_start)
 
         # ── LOCKED state ──────────────────────────────────────────────────────
         if self._state == _State.LOCKED:
@@ -134,7 +145,7 @@ class RightHandProcessor:
             return  # no cursor, no gestures while locked
 
         # ── Fist → LOCKED ─────────────────────────────────────────────────────
-        if fist and self._state not in (_State.LEFT_PINCH_PENDING_DRAG, _State.DRAGGING):
+        if fist and not thumb_idx_pinch and not thumb_mid_pinch and self._state not in (_State.LEFT_PINCH_PENDING_DRAG, _State.DRAGGING):
             if self._state == _State.DRAGGING:
                 self._actuator.drag_end()
             self._state = _State.LOCKED
@@ -162,19 +173,22 @@ class RightHandProcessor:
             return
 
         # ── Right click ───────────────────────────────────────────────────────
-        if (
-            d_thumb_mid < THUMB_MIDDLE_CLICK_DIST
-            and self._state == _State.IDLE
-            and (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS
-        ):
-            self._actuator.right_click()
-            self._last_gesture_time = now
-            logger.debug("Right click (d=%.4f)", d_thumb_mid)
-            return
+        if self._state == _State.IDLE:
+            if thumb_mid_pinch and not self._right_click_active:
+                self._right_click_active = True
+                self._last_gesture_time = now
+                return
+            if self._right_click_active and not thumb_mid_pinch:
+                if (now - self._last_gesture_time) >= GESTURE_COOLDOWN_SECONDS:
+                    self._actuator.right_click()
+                    self._last_gesture_time = now
+                self._right_click_active = False
+                return
 
         # ── Left click / drag state machine ───────────────────────────────────
         if self._state == _State.IDLE:
             if thumb_idx_pinch:
+                self._left_pinch_active = True
                 self._state = _State.LEFT_PINCH_PENDING_DRAG
                 self._pinch_start_time = now
 
@@ -193,6 +207,7 @@ class RightHandProcessor:
                     self._last_gesture_time = now
                 self._state = _State.IDLE
                 self._pinch_start_time = None
+                self._left_pinch_active = False
 
             elif self._pinch_start_time is not None and (now - self._pinch_start_time) >= DRAG_HOLD_SECONDS:
                 self._actuator.drag_start()
@@ -204,6 +219,7 @@ class RightHandProcessor:
                 self._actuator.drag_end()
                 self._state = _State.IDLE
                 self._pinch_start_time = None
+                self._left_pinch_active = False
                 logger.debug("Drag end")
 
         # ── Cursor movement (IDLE and DRAGGING only) ──────────────────────────
