@@ -20,12 +20,11 @@ from core.keyboard_utils import pinch_distance
 
 # QWERTY layout: each row is a list of key labels
 QWERTY_LAYOUT = [
-    ["ESC","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"],
-    ["GRAVE","1","2","3","4","5","6","7","8","9","0","-","=","BACKSPACE"],
-    ["TAB","Q","W","E","R","T","Y","U","I","O","P","[","]","BACKSLASH"],
-    ["CAPS","A","S","D","F","G","H","J","K","L",";","'","ENTER"],
-    ["SHIFT","Z","X","C","V","B","N","M",",",".","/","SHIFT"],
-    ["CTRL","ALT","WIN","SPACE","LEFT","DOWN","UP","RIGHT"],
+    ["ESC","1","2","3","4","5","6","7","8","9","0","BACKSPACE"],
+    ["Q","W","E","R","T","Y","U","I","O","P"],
+    ["A","S","D","F","G","H","J","K","L","ENTER"],
+    ["SHIFT","Z","X","C","V","B","N","M",",",".","/"],
+    ["CTRL","ALT","SPACE","CAPS"],
 ]
 
 
@@ -57,19 +56,21 @@ class VirtualKeyboard:
         self,
         frame_width: int,
         frame_height: int,
-        key_width: int = 70,
-        key_height: int = 70,
-        key_margin: int = 8,
+        key_width: int = 54,
+        key_height: int = 44,
+        key_margin: int = 5,
         pinch_on_threshold: float = 52.0,
         pinch_off_threshold: float = 68.0,
         key_switch_delay: float = 0.10,
         hover_alpha: float = 0.32,
         hover_stable_frames: int = 2,
-        key_hit_padding: int = 22,
+        key_hit_padding: int = 15,
+        compact: bool = True,
     ):
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.visible = False
+        self.compact = compact
         self.key_width = key_width
         self._held_modifiers: set[str] = set()
         self.key_height = key_height
@@ -133,7 +134,15 @@ class VirtualKeyboard:
                    "SHIFT":110,"CTRL":78,"ALT":78,"WIN":78,"SPACE":320,
                    "LEFT":62,"DOWN":62,"UP":62,"RIGHT":62}
         for n in range(1,13): special[f"F{n}"] = 58
-        for row_idx, row in enumerate(QWERTY_LAYOUT):
+        layout = QWERTY_LAYOUT if self.compact else [
+            ["ESC","F1","F2","F3","F4","F5","F6","F7","F8","F9","F10","F11","F12"],
+            ["GRAVE","1","2","3","4","5","6","7","8","9","0","-","=","BACKSPACE"],
+            ["TAB","Q","W","E","R","T","Y","U","I","O","P","[","]","BACKSLASH"],
+            ["CAPS","A","S","D","F","G","H","J","K","L",";","'","ENTER"],
+            ["SHIFT","Z","X","C","V","B","N","M",",",".","/","SHIFT"],
+            ["CTRL","ALT","WIN","SPACE","LEFT","DOWN","UP","RIGHT"],
+        ]
+        for row_idx, row in enumerate(layout):
             y = top + row_idx * (self.key_height + self.key_margin)
             widths = [special.get(label, self.key_width) for label in row]
             total = sum(widths) + self.key_margin * (len(row) - 1)
