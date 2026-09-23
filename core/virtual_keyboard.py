@@ -258,6 +258,7 @@ class VirtualKeyboard:
         self,
         thumb_tip: tuple[int, int],
         index_tip: tuple[int, int],
+        ai_allowed: bool = True,
     ) -> bool:
         """
         Type keys with glide support while pinching.
@@ -281,7 +282,9 @@ class VirtualKeyboard:
                 current_label != self._pinch_active_key and self._pinch_active_key is not None
             )
 
-            if new_pinch or moved_to_new_key:
+            if ai_allowed and (
+                new_pinch or moved_to_new_key or self._pinch_active_key is None
+            ):
                 typed = self._type_key(current_label, current_time)
                 self._pinch_active_key = current_label
 

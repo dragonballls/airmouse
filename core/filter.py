@@ -73,6 +73,12 @@ class OneEuroFilter:
         self._dx = _LowPassFilter(_smoothing_factor(1.0 / freq, dcutoff))
         self._last_time: float | None = None
 
+    def reset(self) -> None:
+        """Forget previous samples so reacquired hands do not inherit stale position."""
+        self._x = _LowPassFilter(_smoothing_factor(1.0 / self._freq, self._mincutoff))
+        self._dx = _LowPassFilter(_smoothing_factor(1.0 / self._freq, self._dcutoff))
+        self._last_time = None
+
     def __call__(self, x: float, timestamp: float | None = None) -> float:
         """
         Filter a new scalar sample.

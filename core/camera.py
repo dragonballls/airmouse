@@ -57,9 +57,17 @@ class AsyncCamera:
         self._cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
 
         if not self._cap.isOpened():
+            logger.warning(
+                "DirectShow could not open camera %s; falling back to OpenCV default backend.",
+                CAMERA_INDEX,
+            )
+            self._cap.release()
+            self._cap = cv2.VideoCapture(CAMERA_INDEX)
+
+        if not self._cap.isOpened():
             raise RuntimeError(
-                f"Cannot open camera index {CAMERA_INDEX} via DirectShow. "
-                "Verify the webcam is connected and its driver exposes a DirectShow interface."
+                f"Cannot open camera index {CAMERA_INDEX}. "
+                "Verify the webcam is connected and not exclusively claimed by another app."
             )
 
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_WIDTH)
