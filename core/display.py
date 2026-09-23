@@ -134,11 +134,14 @@ def map_to_desktop(
         (screen_x, screen_y) in physical desktop pixels
     """
     # Mirror x-axis: webcam sees user's right as image-left, so invert
-    # for natural 1:1 hand-to-cursor mapping (move hand right -> cursor right)
-    px = (1.0 - norm_x) * CAMERA_WIDTH
-    py = norm_y * CAMERA_HEIGHT
+    # for natural 1:1 hand-to-cursor mapping (move hand right -> cursor right).
+    # Work directly within the configured trackpad zone so mapping remains
+    # correct even when callers use a different frame resolution in tests.
+    zone_width = max(trackpad.x_max - trackpad.x_min, 1)
+    zone_height = max(trackpad.y_max - trackpad.y_min, 1)
+    px = trackpad.x_min + (1.0 - norm_x) * zone_width
+    py = trackpad.y_min + norm_y * zone_height
 
-    # Clamp to trackpad zone
     px = max(trackpad.x_min, min(trackpad.x_max, px))
     py = max(trackpad.y_min, min(trackpad.y_max, py))
 
