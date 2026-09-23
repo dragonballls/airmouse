@@ -8,9 +8,11 @@ from core.virtual_keyboard import VirtualKeyboard
 def test_keyboard_contains_practical_keys():
     keyboard = VirtualKeyboard(1280, 720)
     labels = {key.label for key in keyboard.keys}
-    required = {"ESC", "F1", "F12", "BACKSPACE", "TAB", "CAPS", "ENTER",
-                "SHIFT", "SPACE", "CTRL", "ALT", "WIN", "LEFT", "RIGHT",
-                "Q", "A", "Z", "0"}
+    required = {
+        "ESC", "F1", "F12", "BACKSPACE", "TAB", "CAPS", "ENTER",
+        "SHIFT", "SPACE", "CTRL", "ALT", "WIN", "LEFT", "RIGHT",
+        "Q", "A", "Z", "0",
+    }
     assert required <= labels
     keyboard.close()
 
@@ -37,5 +39,13 @@ def test_keyboard_sends_key_events():
 
 
 def test_hands_only_toggle_helper():
-    from main import _keyboard_toggle_pose
+    from main import (
+        CAMERA_HEIGHT,
+        CAMERA_WIDTH,
+        SHOW_CAMERA_UI,
+        _keyboard_toggle_pose,
+    )
     assert callable(_keyboard_toggle_pose)
+    assert CAMERA_WIDTH > 0
+    assert CAMERA_HEIGHT > 0
+    assert isinstance(SHOW_CAMERA_UI, bool)
