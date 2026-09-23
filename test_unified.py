@@ -227,3 +227,34 @@ def test_semantic_decision_survives_release_grace():
     assert decision.gesture == "left_click"
     assert decision.target_hand == "right"
     semantic.close()
+
+
+def test_jev_configuration_is_optional(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    from core.jev_assist import JevGestureClassifier
+
+    classifier = JevGestureClassifier()
+    assert classifier.enabled is False
+    assert "TYPESAFE_API_KEY" in classifier.status
+
+
+def test_video_tracker_blank_frame_returns_empty_result(monkeypatch):
+    import numpy as np
+    import core.tracker as tracker_module
+
+    class FakeDetector:
+        def detect_for_video(self, image, timestamp_ms):
+            assert timestamp_ms >= 0
+            return type("Result", (), {"hand_landmarks": [], "handedness": []})()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(tracker_module.HandLandmarker, "create_from_options", lambda _opts: FakeDetector())
+    monkeypatch.setattr(tracker_module, "ensure_model", lambda: object())
+
+    tracker = tracker_module.HandTracker()
+    result = tracker.process(np.zeros((64, 64, 3), dtype=np.uint8))
+    assert result.left is None
+    assert result.right is None
+    tracker.close()
