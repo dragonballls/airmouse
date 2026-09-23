@@ -2,21 +2,8 @@
 """
 Windows mouse actuation via SendInput.
 
-Why SendInput over mouse_event:
-- mouse_event is deprecated since Windows Vista; routes through a compatibility shim
-- SendInput is the documented, low-overhead replacement
-- MOUSEEVENTF_VIRTUALDESK + MOUSEEVENTF_ABSOLUTE correctly spans all monitors
-
-Why SendInput over pynput for movement:
-- pynput wraps SendInput anyway; calling ctypes directly removes one layer
-- pynput is used here only for click/drag state because its press/release
-  abstraction is cleaner than manually managing button flags in INPUT structs
-
-Coordinate system for MOUSEEVENTF_ABSOLUTE:
-- The virtual desktop is mapped to a normalized space of [0, 65535] x [0, 65535]
-- Physical pixel (x, y) -> norm = (x * 65535 / total_w, y * 65535 / total_h)
-- MOUSEEVENTF_VIRTUALDESK flag makes (65535, 65535) = bottom-right of ALL monitors
-  Without this flag, (65535, 65535) = bottom-right of the PRIMARY monitor only
+Movement uses SendInput directly for low overhead. Click/drag/keyboard
+operations use pynput for reliable button/key state handling.
 """
 
 import ctypes
@@ -29,15 +16,18 @@ logger = logging.getLogger(__name__)
 
 _user32 = ctypes.WinDLL("user32", use_last_error=True)
 
-# ── SendInput ctypes structures ───────────────────────────────────────────────
+
+class POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
 
 class MOUSEINPUT(ctypes.Structure):
     _fields_ = [
-        ("dx",          ctypes.c_long),
-        ("dy",          ctypes.c_long),
-        ("mouseData",   ctypes.c_ulong),
-        ("dwFlags",     ctypes.c_ulong),
-        ("time",        ctypes.c_ulong),
+        ("dx", ctypes.c_long),
+        ("dy", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("dwFlags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
         ("dwExtraInfo", ctypes.c_size_t),
     ]
 
@@ -50,35 +40,33 @@ class INPUT(ctypes.Structure):
     _anonymous_ = ("_u",)
     _fields_ = [
         ("type", ctypes.c_ulong),
-        ("_u",   _INPUT_UNION),
+        ("_u", _INPUT_UNION),
     ]
 
 
-INPUT_MOUSE              = 0
-MOUSEEVENTF_MOVE         = 0x0001
-MOUSEEVENTF_ABSOLUTE     = 0x8000
-MOUSEEVENTF_VIRTUALDESK  = 0x4000   # Interpret absolute coords as virtual desktop coords
+INPUT_MOUSE = 0
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
 
 
 def _send_input(inp: INPUT) -> None:
     result = _user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
     if result == 0:
         err = ctypes.get_last_error()
-        logger.warning("SendInput returned 0 (UIPI block or invalid input?). GetLastError=%d", err)
+        logger.warning("SendInput returned 0 (error=%d)", err)
 
-
-# ── Public Actuator ───────────────────────────────────────────────────────────
 
 class MouseActuator:
-    """
-    Handles all mouse movement and click state.
+    """Centralized mouse/keyboard output with a persistent cursor-lock mode."""
 
-    Args:
-        total_width:  Physical pixel width of the full virtual desktop
-        total_height: Physical pixel height of the full virtual desktop
-    """
-
-    def __init__(self, total_width: int, total_height: int, origin_x: int = 0, origin_y: int = 0) -> None:
+    def __init__(
+        self,
+        total_width: int,
+        total_height: int,
+        origin_x: int = 0,
+        origin_y: int = 0,
+    ) -> None:
         self._total_w = total_width
         self._total_h = total_height
         self._origin_x = origin_x
@@ -86,17 +74,17 @@ class MouseActuator:
         self._pynput = MouseController()
         self._dragging = False
         self._keyboard = KeyboardController()
+        self._cursor_locked = False
+        self._locked_position: tuple[int, int] | None = None
         logger.info("MouseActuator ready (%dx%d desktop)", total_width, total_height)
 
     def move(self, x: int, y: int) -> None:
-        """
-        Move cursor to absolute desktop coordinates (physical pixels).
-        Maps to SendInput's [0, 65535] normalized space.
-        """
+        """Move to absolute desktop coordinates unless cursor lock is active."""
+        if self._cursor_locked:
+            return
+
         norm_x = int((x - self._origin_x) * 65535 / max(self._total_w - 1, 1))
         norm_y = int((y - self._origin_y) * 65535 / max(self._total_h - 1, 1))
-
-        # Clamp to valid range
         norm_x = max(0, min(65535, norm_x))
         norm_y = max(0, min(65535, norm_y))
 
@@ -112,6 +100,43 @@ class MouseActuator:
             ),
         )
         _send_input(inp)
+
+    def _get_cursor_position(self) -> tuple[int, int] | None:
+        point = POINT()
+        if _user32.GetCursorPos(ctypes.byref(point)):
+            return int(point.x), int(point.y)
+        return None
+
+    def lock_cursor(self) -> None:
+        """Freeze virtual cursor movement at its current Windows position."""
+        if self._cursor_locked:
+            return
+        self._locked_position = self._get_cursor_position()
+        self._cursor_locked = True
+        logger.info("Cursor locked at %s", self._locked_position)
+
+    def unlock_cursor(self) -> None:
+        """Release the cursor lock without moving the cursor."""
+        if not self._cursor_locked:
+            return
+        self._cursor_locked = False
+        logger.info("Cursor unlocked")
+
+    def toggle_cursor_lock(self) -> bool:
+        """Toggle cursor lock and return the new lock state."""
+        if self._cursor_locked:
+            self.unlock_cursor()
+        else:
+            self.lock_cursor()
+        return self._cursor_locked
+
+    @property
+    def cursor_locked(self) -> bool:
+        return self._cursor_locked
+
+    @property
+    def locked_position(self) -> tuple[int, int] | None:
+        return self._locked_position
 
     def left_click(self) -> None:
         self._pynput.click(Button.left)
@@ -132,9 +157,6 @@ class MouseActuator:
             logger.debug("Drag ended")
 
     def scroll(self, ticks: int) -> None:
-        """
-        Scroll vertically. Positive ticks = scroll up, negative = scroll down.
-        """
         self._pynput.scroll(0, ticks)
 
     def double_click(self) -> None:
@@ -142,8 +164,8 @@ class MouseActuator:
 
     def win_d(self) -> None:
         with self._keyboard.pressed(Key.cmd):
-            self._keyboard.press('d')
-            self._keyboard.release('d')
+            self._keyboard.press("d")
+            self._keyboard.release("d")
 
     def alt_tab(self) -> None:
         with self._keyboard.pressed(Key.alt):
@@ -166,8 +188,8 @@ class MouseActuator:
 
     def win_l(self) -> None:
         with self._keyboard.pressed(Key.cmd):
-            self._keyboard.press('l')
-            self._keyboard.release('l')
+            self._keyboard.press("l")
+            self._keyboard.release("l")
 
     def win_snap_left(self) -> None:
         with self._keyboard.pressed(Key.cmd):
@@ -187,13 +209,13 @@ class MouseActuator:
 
     def zoom_in(self) -> None:
         with self._keyboard.pressed(Key.ctrl):
-            self._keyboard.press('=')
-            self._keyboard.release('=')
+            self._keyboard.press("=")
+            self._keyboard.release("=")
 
     def zoom_out(self) -> None:
         with self._keyboard.pressed(Key.ctrl):
-            self._keyboard.press('-')
-            self._keyboard.release('-')
+            self._keyboard.press("-")
+            self._keyboard.release("-")
 
     @property
     def is_dragging(self) -> bool:
