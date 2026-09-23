@@ -21,22 +21,41 @@ class GestureOrchestrator:
         actuator: MouseActuator,
         desktop: VirtualDesktop,
         trackpad: TrackpadZone,
+        ai_required: bool = False,
     ) -> None:
         self._right = RightHandProcessor(actuator, desktop, trackpad)
         self._left = LeftHandProcessor(actuator)
         self._two = TwoHandProcessor(actuator)
-        logger.info("GestureOrchestrator ready (safe dual-hand mode)")
+        self._ai_required = ai_required
+        logger.info(
+            "GestureOrchestrator ready (safe dual-hand mode, AI gate=%s)",
+            "on" if ai_required else "off",
+        )
 
-    def process(self, hands: HandsResult) -> None:
+    def process(
+        self,
+        hands: HandsResult,
+        ai_gesture: str | None = None,
+    ) -> None:
         both = hands.left is not None and hands.right is not None
         two_hand_exclusive = False
 
         if both:
-            two_hand_exclusive = self._two.process(hands.left, hands.right)
+            two_hand_exclusive = self._two.process(
+                hands.left,
+                hands.right,
+                ai_gesture=ai_gesture,
+                ai_required=self._ai_required,
+            )
         else:
             self._two.reset()
 
-        self._right.process(hands.right, suppress_actions=two_hand_exclusive)
+        self._right.process(
+            hands.right,
+            suppress_actions=two_hand_exclusive,
+            ai_gesture=ai_gesture,
+            ai_required=self._ai_required,
+        )
         self._left.process(hands.left)
 
     def reset(self) -> None:
