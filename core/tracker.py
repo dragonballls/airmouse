@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,17 @@ class HandsResult:
 
 def resolve_model_path() -> Path:
     p = Path(MP_MODEL_PATH)
-    return p if p.is_absolute() else Path(__file__).resolve().parents[1] / p
+    if p.is_absolute():
+        return p
+
+    if getattr(sys, "frozen", False):
+        bundle_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        bundled = bundle_root / p
+        if bundled.exists() and bundled.stat().st_size > 100_000:
+            return bundled
+        return Path(sys.executable).resolve().parent / p
+
+    return Path(__file__).resolve().parents[1] / p
 
 
 def ensure_model() -> Path:
