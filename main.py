@@ -24,6 +24,7 @@ from config import (
     PROCESS_PRIORITY,
     AI_GESTURE_MAX_AGE_S,
     AI_GESTURE_MIN_CONFIDENCE,
+    AI_GESTURE_GRACE_S,
     SHOW_CAMERA_UI,
     TIMER_RESOLUTION_MS,
 )
@@ -382,8 +383,13 @@ def run() -> None:
                 )
 
                 if candidate != previous_candidate:
-                    pinch_candidate_started = now if candidate in {"index_pinch", "middle_pinch"} else None
-                    semantic_ai.clear()
+                    pinch_candidate_started = (
+                        now if candidate in {"index_pinch", "middle_pinch"} else None
+                    )
+                    # Keep a completed AI decision alive through the release edge.
+                    # This is critical for click gestures whose action occurs on release.
+                    if candidate is not None:
+                        semantic_ai.clear()
                     previous_candidate = candidate
                 elif candidate in {"index_pinch", "middle_pinch"} and pinch_candidate_started is None:
                     pinch_candidate_started = now
@@ -404,9 +410,18 @@ def run() -> None:
                 )
                 semantic_ai.poll()
 
-                decision = None
-                if candidate:
-                    decision = semantic_ai.current(candidate, max_age=AI_GESTURE_MAX_AGE_S)
+                if candidate is not None:
+                    decision = semantic_ai.current(
+                        candidate,
+                        max_age=AI_GESTURE_MAX_AGE_S,
+                        grace=AI_GESTURE_GRACE_S,
+                    )
+                else:
+                    decision = semantic_ai.current(
+                        None,
+                        max_age=AI_GESTURE_MAX_AGE_S,
+                        grace=AI_GESTURE_GRACE_S,
+                    )
                 if decision is not None:
                     ai_gesture = decision.gesture
                     ai_confidence = decision.confidence
