@@ -1,5 +1,9 @@
 name: Unified hand-control CI
 
+concurrency:
+  group: unified-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
