@@ -274,6 +274,8 @@ def _draw_status(
         hint = "Right hand: hover + thumb/index pinch to type | Left 3-finger hold = toggle | K = toggle | Q = quit"
     else:
         hint = "Left index = cursor | Right pinch = click | thumb+middle = right-click | pinch-hold = drag | Left fist hold = lock/unlock"
+    if mouse_locked and mode == "mouse":
+        hint = "MOUSE LOCKED | Left fist hold again to unlock"
     cv2.putText(frame, hint, (18, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.36, (195, 200, 208), 1, cv2.LINE_AA)
 
     if keyboard_toggle.started is not None:
@@ -440,7 +442,7 @@ def run() -> None:
                     hands_hint += f" Current frame-to-frame wrist dy={wrist_dy:.4f}."
 
                 semantic_ai.submit(
-                    _ai_frame_crop(frame, hands),
+                    _ai_frame_crop(frame, hands) if semantic_ai.enabled else None,
                     candidate or "",
                     "keyboard" if keyboard.visible else "mouse",
                     hands_hint,
