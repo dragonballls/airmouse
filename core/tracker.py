@@ -9,7 +9,7 @@ from urllib.request import Request,urlopen
 import cv2, mediapipe as mp, numpy as np
 from mediapipe.tasks import python
 from mediapipe.tasks.python.vision import HandLandmarker,HandLandmarkerOptions,RunningMode
-from config import FLIP_HANDEDNESS,MP_DETECTION_CONFIDENCE,MP_MAX_HANDS,MP_MODEL_PATH,MP_MODEL_URL,MP_TRACKING_CONFIDENCE,INFERENCE_WIDTH,INFERENCE_HEIGHT
+from config import FLIP_HANDEDNESS,MP_DETECTION_CONFIDENCE,MP_MAX_HANDS,MP_MODEL_PATH,MP_MODEL_URL,MP_TRACKING_CONFIDENCE,INFERENCE_WIDTH,INFERENCE_HEIGHT,INFERENCE_FPS
 logger=logging.getLogger(__name__)
 @dataclass
 class Landmark:
@@ -46,14 +46,21 @@ def ensure_model()->Path:
 class HandTracker:
     def __init__(self)->None:
         self._last_timestamp_ms=0
+        self._last_inference_time=0.0
+        self._last_result=HandsResult()
         base=python.BaseOptions(model_asset_path=str(ensure_model()))
         opts=HandLandmarkerOptions(base_options=base,running_mode=RunningMode.VIDEO,
             num_hands=MP_MAX_HANDS,min_hand_detection_confidence=MP_DETECTION_CONFIDENCE,
             min_hand_presence_confidence=MP_TRACKING_CONFIDENCE,min_tracking_confidence=MP_TRACKING_CONFIDENCE)
         self._detector=HandLandmarker.create_from_options(opts)
     def process(self,frame:np.ndarray)->HandsResult:
+        if frame is None or frame.size==0:return HandsResult()
+        now=time.perf_counter()
+        interval=1.0/max(INFERENCE_FPS,1)
+        if self._last_inference_time and (now-self._last_inference_time) < interval:
+            return self._last_result
+        self._last_inference_time=now
         out=HandsResult()
-        if frame is None or frame.size==0:return out
         try:
             if frame.shape[1] != INFERENCE_WIDTH or frame.shape[0] != INFERENCE_HEIGHT:
                 frame=cv2.resize(frame,(INFERENCE_WIDTH,INFERENCE_HEIGHT),interpolation=cv2.INTER_AREA)
@@ -71,6 +78,7 @@ class HandTracker:
             is_right=(label=="Right") if not FLIP_HANDEDNESS else (label=="Left")
             if is_right: out.right=lms
             else: out.left=lms
+        self._last_result=out
         return out
     def close(self)->None:self._detector.close()
     def __enter__(self)->"HandTracker":return self
