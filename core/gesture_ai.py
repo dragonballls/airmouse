@@ -8,6 +8,7 @@ safe semantic labels. AI output never contains OS commands.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 import threading
 import time
 from typing import Any
@@ -71,6 +72,11 @@ class SemanticGestureAI:
 
     @property
     def enabled(self) -> bool:
+        # Keep the real-time input path deterministic by default. Gesture AI is
+        # an optional semantic layer and can be explicitly enabled with
+        # AIRMOUSE_ENABLE_GESTURE_AI=1 when wanted.
+        if os.getenv("AIRMOUSE_ENABLE_GESTURE_AI", "0").lower() not in {"1", "true", "yes", "on"}:
+            return False
         return bool(
             (self._jev is not None and self._jev.enabled)
             or (self._assistant.enabled and self._assistant.provider == "gemini")
