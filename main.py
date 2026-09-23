@@ -7,6 +7,7 @@ import atexit
 import ctypes
 import logging
 import os
+import sys
 import time
 import traceback
 from typing import Optional
@@ -329,6 +330,58 @@ def _draw_status(
             if not chunk:
                 break
             cv2.putText(frame, chunk, (18, panel_top + 45 + idx * 20), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (235, 235, 235), 1, cv2.LINE_AA)
+
+
+def _self_test() -> int:
+    """Exercise the frozen/runtime import graph without touching the physical camera."""
+    from pathlib import Path
+    from core.tracker import HandTracker
+    from core.virtual_keyboard import VirtualKeyboard
+    from core.display import build_trackpad_zone, build_virtual_desktop
+    from core.gestures import GestureOrchestrator
+    from core.text_input import TextInputDetector
+
+    os.environ["AIRMOUSE_ENABLE_GESTURE_AI"] = "0"
+    desktop = build_virtual_desktop()
+    trackpad = build_trackpad_zone()
+    actuator = MouseActuator(
+        desktop.total_width,
+        desktop.total_height,
+        origin_x=desktop.origin_x,
+        origin_y=desktop.origin_y,
+    )
+    processor = GestureOrchestrator(actuator, desktop, trackpad)
+    processor.reset()
+
+    keyboard = VirtualKeyboard(640, 280, key_width=54, key_height=42, key_margin=5, compact=True)
+    assert keyboard.keys, "virtual keyboard did not build"
+    keyboard.close()
+
+    text_detector = TextInputDetector()
+    assert text_detector is not None
+
+    tracker = HandTracker()
+    try:
+        frame = np.zeros((180, 320, 3), dtype=np.uint8)
+        first_buffer_id = None
+        for _ in range(6):
+            result = tracker.process(frame)
+            assert result.left is None and result.right is None, "synthetic blank frame produced a hand"
+            if first_buffer_id is None:
+                first_buffer_id = id(tracker._rgb_buffer)
+            else:
+                assert id(tracker._rgb_buffer) == first_buffer_id, "RGB conversion buffer was not reused"
+    finally:
+        tracker.close()
+
+    if getattr(sys, "frozen", False):
+        model_path = Path(getattr(sys, "_MEIPASS", "")) / "models" / "hand_landmarker.task"
+        if not model_path.exists():
+            model_path = Path(sys.executable).resolve().parent / "models" / "hand_landmarker.task"
+        assert model_path.exists(), f"bundled MediaPipe model missing: {model_path}"
+
+    print("AIRMOUSE SELF-TEST PASS")
+    return 0
 
 
 def run() -> None:
@@ -669,4 +722,6 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        raise SystemExit(_self_test())
     run()
