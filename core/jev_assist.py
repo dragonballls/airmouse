@@ -13,6 +13,7 @@ class JevGestureClassifier:
         self._api_key = os.getenv("TYPESAFE_API_KEY", "").strip()
         self._available = False
         self._error: str | None = None
+        self._client: Any | None = None
 
         if not self._api_key:
             return
@@ -21,7 +22,11 @@ class JevGestureClassifier:
             from typesafe_sdk import Choice, TypeSafeClient
 
             self._choice = Choice
-            self._client_cls = TypeSafeClient
+            self._client = TypeSafeClient(
+                api_key=self._api_key,
+                model=self.model,
+                timeout=3.0,
+            )
             self._available = True
         except Exception as exc:
             self._error = str(exc)
@@ -74,23 +79,18 @@ class JevGestureClassifier:
         }
 
         try:
-            with self._client_cls(
-                api_key=self._api_key,
-                model=self.model,
-                timeout=3.0,
-            ) as client:
-                response = client.system_one(
-                    state=state,
-                    questions={
-                        "gesture": self._choice(
-                            instructions=(
-                                "Select the single semantic air-mouse action that best "
-                                "matches the observed state. This is a closed-set decision."
-                            ),
-                            criteria=criteria,
-                        )
-                    },
-                )
+            response = self._client.system_one(
+                state=state,
+                questions={
+                    "gesture": self._choice(
+                        instructions=(
+                            "Select the single semantic air-mouse action that best "
+                            "matches the observed state. This is a closed-set decision."
+                        ),
+                        criteria=criteria,
+                    )
+                },
+            )
 
             answer = response.choices["gesture"]
             gesture = str(answer.choice).strip().lower()
