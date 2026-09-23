@@ -1,33 +1,47 @@
 # AI gesture control
 
-The air-mouse keeps latency-sensitive MediaPipe hand tracking local for cursor
-movement, while Gemini provides semantic classification for deliberate gesture
-candidates.
+The air-mouse combines local MediaPipe tracking with two AI layers:
 
-## Configure
+1. Jev is the fast primary semantic decision layer. It consumes compact,
+   structured hand-tracker state and returns a typed action choice.
+2. Gemini is the visual fallback for ambiguous or low-confidence candidates and
+   can inspect the actual camera image.
 
-Google Gemini is supported directly. Set the key as a Windows user variable
-without printing it:
+Pointer tracking stays local for responsiveness. AI only authorizes bounded,
+predefined actions.
+
+## Configure Jev
+
+The official TypeSafe Python SDK is included in requirements.txt.
+
+Set a TypeSafe API key as a Windows user environment variable without printing
+it:
+
+    [Environment]::SetEnvironmentVariable("TYPESAFE_API_KEY","YOUR_KEY","User")
+
+The official SDK reads TYPESAFE_API_KEY and defaults to jev-latest. Do not commit
+the key to the repository.
+
+Jev direct access may require a TypeSafe account. The application remains
+functional with Gemini alone when a TypeSafe key is not configured.
+
+## Configure Gemini
+
+Set the Google key as a Windows user environment variable without printing it:
 
     [Environment]::SetEnvironmentVariable("GEMINI_API_KEY","YOUR_KEY","User")
 
-Default live gesture model:
+Default model:
 
     gemini-3.5-flash-lite
 
-Override it with GEMINI_MODEL when needed.
+Override with GEMINI_MODEL when needed.
 
-OpenAI remains available for the explicit A-key diagnostic fallback:
+## Live semantic behavior
 
-    [Environment]::SetEnvironmentVariable("OPENAI_API_KEY","YOUR_KEY","User")
-    [Environment]::SetEnvironmentVariable("OPENAI_MODEL","gpt-5.6","User")
+When Jev is available, it is asked to select exactly one action from:
 
-Never commit an API key to the repository.
-
-## Live AI gesture layer
-
-When Gemini is configured, deliberate actions use a closed semantic label set:
-
+- none
 - left_click
 - right_click
 - drag
@@ -39,51 +53,57 @@ When Gemini is configured, deliberate actions use a closed semantic label set:
 - keyboard_type
 - unknown
 
-The camera frame and a small local-tracker hint are sent asynchronously to
-Gemini only for deliberate gesture candidates, rather than on every camera
-frame. The classifier returns structured JSON containing the gesture,
-target hand, and confidence.
+The state includes current mode, local hand ownership, deliberate candidate,
+hold duration, and temporal two-hand motion. Jev returns a typed choice plus
+probabilities and confidence.
 
-The AI does not receive OS-control tools or arbitrary commands. The application
-accepts only the predefined labels and also checks the expected hand before
-executing an action. Low-confidence, stale, unknown, or wrong-hand decisions
-are rejected.
+When Jev is unavailable or uncertain, Gemini receives the compressed camera
+frame and performs structured visual classification. Unknown or low-confidence
+decisions are rejected.
 
-Pointer movement remains local so network latency does not make the cursor
-jerky. Click/drag/scroll/zoom and keyboard actions are AI-authorized when the
-Gemini gate is enabled.
+The action executor remains hard-coded and closed-set. AI cannot supply a
+Windows command, application name, key sequence, or arbitrary function call.
 
-## Controls
+## Gestures
 
-### Mouse mode
+### Mouse
 
-- Right index finger: point/move
-- Thumb + index pinch: AI distinguishes left click versus sustained drag
-- Thumb + middle pinch: AI-authorized right click
-- Peace sign + wrist movement: AI determines scroll direction
-- Fist: local safety lock
+Right index finger controls the pointer locally.
+
+Thumb + index:
+- short intentional pinch -> AI-authorized left click
+- sustained intentional pinch -> AI-authorized drag
+
+Thumb + middle:
+- intentional pinch -> AI-authorized right click
+
+Peace sign + wrist movement:
+- AI-authorized scroll direction
+
+Fist:
+- local safety lock
 
 ### Two hands
 
-Both hands holding a deliberate thumb-index pinch create a protected zoom
-candidate. Gemini classifies zoom direction and the local two-hand state gate
-requires both hands.
+Both hands holding thumb-index pinches create the protected zoom candidate.
+Temporal wrist separation is supplied to Jev so it can distinguish zoom in
+(apart) from zoom out (together).
 
 ### Keyboard
 
-Raise three fingers (index, middle, ring) on the left hand and hold for about
-one second. Gemini must identify the left-hand keyboard-toggle sign.
+Raise index + middle + ring on the left hand and hold for about one second.
+Jev or Gemini must recognize the left-hand keyboard-toggle sign before the
+keyboard opens.
 
-Once visible, only the right hand types. Gemini authorizes the right-hand
-thumb-index typing sign before a key is sent.
+Only the right hand types. A right-hand thumb-index pinch over a stabilized key
+requires AI authorization before a key event is sent.
 
-K manually toggles the keyboard for emergency/manual control.
-A requests one explicit visual diagnostic.
+K remains available as the explicit manual keyboard toggle.
+A requests a one-shot visual diagnostic.
 Q or Esc quits.
 
-## Reliability model
+## Reliability
 
-MediaPipe is still the continuous tracker. Gemini is the semantic layer: it
-helps distinguish the intended sign/action and the performing hand, while
-local stable-frame, release, cooldown, and action-boundary checks remain in
-place.
+MediaPipe handles continuous low-latency tracking. Jev handles fast semantic
+choice. Gemini handles visual ambiguity. Stable-frame, release, cooldown,
+freshness, hand-ownership, and closed-set action checks remain in code.
