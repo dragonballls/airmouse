@@ -214,7 +214,7 @@ def _draw_mouse_ui(frame, hands, fps: float) -> None:
     )
 
 
-def run() -> None:
+def run(stop_event=None) -> None:
     original_settings = {}
     keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
     toggle = KeyboardToggle()
@@ -245,7 +245,7 @@ def run() -> None:
                 cv2.namedWindow(window, cv2.WINDOW_NORMAL)
                 cv2.resizeWindow(window, CAMERA_WIDTH, CAMERA_HEIGHT)
 
-            while True:
+            while stop_event is None or not stop_event.is_set():
                 frame = camera.read()
                 if frame is None:
                     time.sleep(0.002)
