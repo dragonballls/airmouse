@@ -77,6 +77,7 @@ class RightHandProcessor:
         self._state = _State.IDLE
 
         self._pinch_start_time: float | None = None
+        self._right_pinch_start_time: float | None = None
         self._last_click_time = 0.0
         self._last_action_time = 0.0
         self._last_scroll_time = 0.0
@@ -119,6 +120,7 @@ class RightHandProcessor:
                 self._actuator.drag_end()
             self._state = _State.IDLE
             self._pinch_start_time = None
+            self._right_pinch_start_time = None
             self._prev_wrist_y = None
             self._last_frame_time = None
             self._reset_gates()
@@ -141,6 +143,7 @@ class RightHandProcessor:
                 self._actuator.drag_end()
             self._state = _State.IDLE
             self._pinch_start_time = None
+            self._right_pinch_start_time = None
             self._reset_gates()
             return
 
@@ -149,6 +152,7 @@ class RightHandProcessor:
                 self._actuator.drag_end()
             self._state = _State.LOCKED
             self._pinch_start_time = None
+            self._right_pinch_start_time = None
             self._reset_gates()
             return
 
@@ -171,7 +175,7 @@ class RightHandProcessor:
         # from a thumb-index pinch.
         if self._state == _State.IDLE and middle_stable and not index_pinch:
             self._state = _State.RIGHT_PINCH
-            self._last_action_time = now
+            self._right_pinch_start_time = now
 
         if self._state == _State.RIGHT_PINCH:
             if self._right_release_gate.update(middle_released):
@@ -179,6 +183,7 @@ class RightHandProcessor:
                     self._actuator.right_click()
                     self._last_action_time = now
                 self._state = _State.IDLE
+                self._right_pinch_start_time = None
                 self._right_release_gate.reset()
 
         elif self._state == _State.IDLE and index_stable:
