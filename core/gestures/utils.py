@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
-import numpy as np
+import math
 
 from core.tracker import Landmark
 
 
 def dist3d(a: Landmark, b: Landmark) -> float:
     """3D Euclidean distance in normalized MediaPipe coordinate space."""
-    return float(np.linalg.norm([a.x - b.x, a.y - b.y, a.z - b.z]))
+    dx = a.x - b.x
+    dy = a.y - b.y
+    dz = a.z - b.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
 def hand_scale(lm: list[Landmark]) -> float:

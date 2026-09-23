@@ -365,3 +365,84 @@ def test_virtual_desktop_preserves_negative_monitor_origin():
     right = map_to_desktop(0.0, 0.5, zone, desktop)
     assert left[0] == -1920
     assert right[0] == 1919
+
+
+def test_ai_left_click_is_authorized_on_release_edge(monkeypatch):
+    from core.gestures import right_hand as rh
+
+    class FakeActuator:
+        def __init__(self):
+            self.clicks = 0
+            self.is_dragging = False
+
+        def left_click(self):
+            self.clicks += 1
+
+        def double_click(self):
+            self.clicks += 2
+
+        def right_click(self):
+            pass
+
+        def drag_start(self):
+            self.is_dragging = True
+
+        def drag_end(self):
+            self.is_dragging = False
+
+        def scroll(self, _ticks):
+            pass
+
+        def move(self, _x, _y):
+            pass
+
+    class FakeFilter:
+        def __call__(self, value, _timestamp=None):
+            return value
+
+        def reset(self):
+            pass
+
+    actuator = FakeActuator()
+    processor = rh.RightHandProcessor(
+        actuator,
+        type("Desktop", (), {"total_width": 1920, "total_height": 1080, "origin_x": 0, "origin_y": 0})(),
+        type("Zone", (), {"x_min": 100, "x_max": 1180, "y_min": 100, "y_max": 620})(),
+    )
+    processor._filter_x = FakeFilter()
+    processor._filter_y = FakeFilter()
+    monkeypatch.setattr(rh, "is_fist", lambda _lm: False)
+    monkeypatch.setattr(rh, "is_peace_sign", lambda _lm: False)
+
+    phase = {"pinch": True}
+
+    def fake_distance(_lm, a, b):
+        if (a, b) == (4, 8):
+            return 0.10 if phase["pinch"] else 0.50
+        return 0.50
+
+    monkeypatch.setattr(rh, "normalized_distance", fake_distance)
+
+    lms = _landmarks()
+    for _ in range(8):
+        processor.process(lms, ai_gesture="left_click", ai_required=True)
+
+    assert actuator.clicks == 0
+
+    phase["pinch"] = False
+    for _ in range(4):
+        processor.process(lms, ai_gesture="left_click", ai_required=True)
+
+    assert actuator.clicks == 1
+
+
+def test_filter_reset_forgets_previous_sample():
+    from core.filter import OneEuroFilter
+
+    filt = OneEuroFilter(freq=60.0)
+    first = filt(0.0, 0.0)
+    _ = filt(1.0, 1.0 / 60.0)
+    filt.reset()
+    after_reset = filt(0.75, 2.0)
+    assert first == 0.0
+    assert after_reset == 0.75

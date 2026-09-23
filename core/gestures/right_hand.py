@@ -119,6 +119,8 @@ class RightHandProcessor:
             self._right_pinch_start_time = None
             self._prev_wrist_y = None
             self._last_frame_time = None
+            self._filter_x.reset()
+            self._filter_y.reset()
             self._reset_gates()
             return
 
@@ -140,6 +142,8 @@ class RightHandProcessor:
             self._state = _State.IDLE
             self._pinch_start_time = None
             self._right_pinch_start_time = None
+            self._filter_x.reset()
+            self._filter_y.reset()
             self._reset_gates()
             return
 
