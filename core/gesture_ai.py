@@ -240,6 +240,12 @@ class SemanticGestureAI:
         if allowed_for_candidate is not None and gesture not in allowed_for_candidate:
             gesture = "unknown"
 
+        try:
+            confidence = float(result.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
         target_hand = str(result.get("target_hand", "unknown")).strip().lower()
         if target_hand not in {"left", "right", "both", "none", "unknown"}:
             target_hand = "unknown"
@@ -260,12 +266,6 @@ class SemanticGestureAI:
             if not target_ok:
                 gesture = "unknown"
                 confidence = 0.0
-
-        try:
-            confidence = float(result.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
-        confidence = max(0.0, min(1.0, confidence))
 
         return GestureDecision(
             gesture=gesture,
