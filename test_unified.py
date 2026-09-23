@@ -446,3 +446,35 @@ def test_filter_reset_forgets_previous_sample():
     after_reset = filt(0.75, 2.0)
     assert first == 0.0
     assert after_reset == 0.75
+
+
+def test_jev_close_releases_optional_client(monkeypatch):
+    import sys
+    import types as pytypes
+
+    class FakeChoice:
+        def __init__(self, **_kwargs):
+            pass
+
+    class FakeClient:
+        closed = False
+
+        def __init__(self, **_kwargs):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    fake = pytypes.ModuleType("typesafe_sdk")
+    fake.Choice = FakeChoice
+    fake.TypeSafeClient = FakeClient
+    monkeypatch.setitem(sys.modules, "typesafe_sdk", fake)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+
+    from core.jev_assist import JevGestureClassifier
+    classifier = JevGestureClassifier()
+    client = classifier._client
+    assert classifier.enabled is True
+    classifier.close()
+    assert client.closed is True
+    assert classifier.enabled is False

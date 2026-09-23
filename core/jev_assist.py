@@ -31,6 +31,19 @@ class JevGestureClassifier:
         except Exception as exc:
             self._error = str(exc)
 
+    def close(self) -> None:
+        """Release the optional SDK client when the application shuts down."""
+        client = self._client
+        self._client = None
+        self._available = False
+        if client is not None:
+            closer = getattr(client, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
+
     @property
     def enabled(self) -> bool:
         return self._available and bool(self._api_key)
