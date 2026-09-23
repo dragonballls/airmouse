@@ -60,5 +60,15 @@ DEBUG_GESTURES=False
 # Do not show the live camera feed. Keyboard mode creates its own non-video HUD.
 SHOW_CAMERA_UI=False
 
+# Contextual typing keyboard. It appears only after the pointer dwells over a
+# Windows UI Automation text field, then stays anchored near that cursor.
+TEXT_INPUT_AUTO_KEYBOARD=True
+TEXT_INPUT_DWELL_SECONDS=0.65
+TEXT_INPUT_POLL_SECONDS=0.20
+TYPING_KEYBOARD_WIDTH=720
+TYPING_KEYBOARD_HEIGHT=320
+TYPING_KEYBOARD_MARGIN=16
+TYPING_KEYBOARD_BOTTOM_MARGIN=18
+
 TIMER_RESOLUTION_MS=1
 PROCESS_PRIORITY=0x80
