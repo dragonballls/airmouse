@@ -85,6 +85,7 @@ class HandTracker:
             min_tracking_confidence=MP_TRACKING_CONFIDENCE,
         )
         self._detector = HandLandmarker.create_from_options(opts)
+        self._rgb_buffer: np.ndarray | None = None
         self._start_time = time.monotonic()
         self._last_timestamp_ms = -1
 
@@ -98,9 +99,11 @@ class HandTracker:
         if frame is None or frame.size == 0:
             return out
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            if self._rgb_buffer is None or self._rgb_buffer.shape != frame.shape or self._rgb_buffer.dtype != np.uint8:
+                self._rgb_buffer = np.empty_like(frame)
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=self._rgb_buffer)
             result = self._detector.detect_for_video(
-                mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb),
+                mp.Image(image_format=mp.ImageFormat.SRGB, data=self._rgb_buffer),
                 self._timestamp_ms(),
             )
         except Exception as exc:
