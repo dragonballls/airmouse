@@ -243,8 +243,7 @@ def run() -> None:
 
                 if toggle.update(hands.left):
                     keyboard.toggle()
-                    if keyboard.visible and actuator.is_dragging:
-                        actuator.drag_end()
+                    processor.reset()
                     logger.info("Virtual keyboard %s","enabled" if keyboard.visible else "disabled")
 
                 if keyboard.visible:
