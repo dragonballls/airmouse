@@ -564,61 +564,43 @@ def run() -> None:
                             authorized_mouse_gesture = None
 
                 if toggle.update(hands.left, authorized=keyboard_toggle_authorized):
-                    keyboard.toggle()
+                    anchor = actuator.cursor_position
+                    if keyboard.visible:
+                        exit_typing()
+                    elif anchor is not None:
+                        enter_typing(anchor, focus_field=False)
                     processor.reset()
                     semantic_ai.clear()
                     previous_candidate = None
                     logger.info(
-                        "Virtual keyboard %s%s",
+                        "Contextual keyboard %s%s",
                         "enabled" if keyboard.visible else "disabled",
                         " (AI authorized)" if semantic_ai.enabled else "",
                     )
 
                 if keyboard.visible:
-                    active = hands.right
-                    if not keyboard_window_created:
-                        cv2.namedWindow(keyboard_window, cv2.WINDOW_NORMAL)
-                        cv2.resizeWindow(keyboard_window, CAMERA_WIDTH, CAMERA_HEIGHT)
-                        keyboard_window_created = True
-
-                    if SHOW_CAMERA_UI:
-                        display = cv2.flip(frame, 1)
-                    else:
-                        display = np.zeros((CAMERA_HEIGHT, CAMERA_WIDTH, 3), dtype=np.uint8)
-                        cv2.putText(
-                            display,
-                            "CAMERA PREVIEW OFF",
-                            (18, 112),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.55,
-                            (150, 160, 175),
-                            1,
-                            cv2.LINE_AA,
-                        )
-                    _draw_hand_overlay(display, hands.left)
-                    _draw_hand_overlay(display, hands.right)
-                    if active and len(active) >= 21:
-                        ix, iy = _mirror(active[8], frame.shape[1], frame.shape[0])
-                        tx, ty = _mirror(active[4], frame.shape[1], frame.shape[0])
-                        keyboard.update_hover(ix, iy)
-                        keyboard.handle_pinch_type(
-                            (tx, ty),
-                            (ix, iy),
-                            ai_allowed=ai_authorizes("keyboard_type", "right"),
-                        )
-                        keyboard.update_gesture((ix, iy))
-                        keyboard.draw(display, finger_pos=(ix, iy))
-                    else:
-                        keyboard.update_hover(-1, -1)
-                        keyboard.update_gesture(None)
-                        keyboard.draw(display, finger_pos=None)
-                    frame = display
-                else:
-                    processor.process(
-                        hands,
-                        ai_gesture=authorized_mouse_gesture,
+                    frame = typing_overlay.update(
+                        hands.right,
+                        ai_allowed=ai_authorizes("keyboard_type", "right"),
                     )
-                    frame = cv2.flip(frame, 1)
+                else:
+                    # Auto-trigger is intentionally slow and infrequent so it
+                    # doesn't interfere with normal AirNav cursor use.
+                    cursor = actuator.cursor_position
+                    if (
+                        text_input is not None
+                        and cursor is not None
+                        and now >= typing_reopen_block_until
+                        and text_input.update(cursor[0], cursor[1], now)
+                    ):
+                        enter_typing(cursor, focus_field=True)
+                        frame = typing_overlay.update(hands.right)
+                    else:
+                        processor.process(
+                            hands,
+                            ai_gesture=authorized_mouse_gesture,
+                        )
+                        frame = cv2.flip(frame, 1)
 
                 fps_frames += 1
                 now = time.perf_counter()
@@ -644,25 +626,27 @@ def run() -> None:
                     cv2.imshow("AirMouse Debug", draw_debug_frame(frame, hands, processor.right_state))
 
                 if keyboard.visible:
-                    cv2.imshow(keyboard_window, frame)
+                    cv2.imshow(typing_overlay.window_name, frame)
                     key = cv2.waitKey(1) & 0xFF
+                    if key in (ord("q"), ord("Q"), 27):
+                        break
                 elif SHOW_CAMERA_UI:
-                    if keyboard_window_created:
-                        cv2.destroyWindow(keyboard_window)
-                        keyboard_window_created = False
                     cv2.imshow(window, frame)
                     key = cv2.waitKey(1) & 0xFF
-                else:
-                    key = -1
                     if key in (ord("q"), ord("Q"), 27):
                         break
                     if key in (ord("k"), ord("K")):
-                        keyboard.toggle()
+                        anchor = actuator.cursor_position
+                        if keyboard.visible:
+                            exit_typing()
+                        elif anchor is not None:
+                            enter_typing(anchor, focus_field=False)
                         processor.reset()
-                        logger.info("Virtual keyboard %s (manual)", "enabled" if keyboard.visible else "disabled")
                     if key in (ord("a"), ord("A")):
                         ai_text = ai.analyze(frame, "keyboard" if keyboard.visible else "mouse")
                         logger.info("AI diagnostic requested")
+                else:
+                    key = -1
     except KeyboardInterrupt:
         logger.info("Ctrl+C received — shutting down cleanly")
     except Exception:
@@ -671,9 +655,7 @@ def run() -> None:
     finally:
         if actuator.is_dragging:
             actuator.drag_end()
-        keyboard.close()
-        if keyboard_window_created:
-            cv2.destroyWindow(keyboard_window)
+        typing_overlay.hide()
         if SHOW_CAMERA_UI or DEBUG_GESTURES:
             cv2.destroyAllWindows()
         _restore_windows_settings(original_settings)
