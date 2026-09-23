@@ -106,3 +106,43 @@ def test_ai_assistant_is_optional_without_any_key(monkeypatch):
     from core.ai_assist import AIAssistant
     assistant = AIAssistant()
     assert assistant.enabled is False
+
+
+def test_semantic_gesture_ai_accepts_closed_set_result():
+    from core.gesture_ai import SemanticGestureAI
+
+    class FakeAssistant:
+        enabled = True
+        provider = "gemini"
+
+        def classify_semantic_gesture(self, **_kwargs):
+            return {
+                "gesture": "right_click",
+                "target_hand": "right",
+                "confidence": 0.91,
+            }
+
+    semantic = SemanticGestureAI(FakeAssistant())
+    decision = semantic._classify(
+        _landmarks(),
+        "middle_pinch",
+        "mouse",
+        "right hand",
+    )
+    assert decision.gesture == "right_click"
+    assert decision.target_hand == "right"
+    assert decision.confidence == 0.91
+    semantic.close()
+
+
+def test_keyboard_does_not_type_without_ai_authorization():
+    keyboard = VirtualKeyboard(1280, 720)
+    vk.pyautogui.write = Mock()
+    vk.pyautogui.press = Mock()
+    keyboard.hovered_key = next(key for key in keyboard.keys if key.label == "Q")
+    keyboard.highlighted_label = "Q"
+    keyboard._hover_stable_count = keyboard.hover_stable_frames
+    keyboard.handle_pinch_type((100, 100), (105, 105), ai_allowed=False)
+    assert not vk.pyautogui.write.called
+    assert not vk.pyautogui.press.called
+    keyboard.close()
