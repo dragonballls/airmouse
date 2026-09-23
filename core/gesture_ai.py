@@ -146,14 +146,20 @@ class SemanticGestureAI:
 
     def current(
         self,
-        candidate: str,
+        candidate: str | None,
         max_age: float = 1.0,
+        grace: float = 0.9,
     ) -> GestureDecision | None:
         with self._lock:
             decision = self._decision
-        if decision is None or decision.candidate != candidate:
+        if decision is None:
             return None
-        if time.perf_counter() - decision.created_at > max_age:
+
+        age = time.perf_counter() - decision.created_at
+        allowed_age = grace if candidate is None else max_age
+        if age > allowed_age:
+            return None
+        if candidate is not None and decision.candidate != candidate:
             return None
         if decision.gesture == "unknown" or decision.confidence < self._min_confidence:
             return None
