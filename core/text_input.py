@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any
 
@@ -14,13 +15,20 @@ _TEXT_CONTROL_TYPES = {"Edit", "Document", "ComboBox"}
 class TextInputDetector:
     """Low-frequency UIA hit-testing with a short cursor dwell trigger."""
 
-    def __init__(self, dwell_seconds: float = 0.65, poll_seconds: float = 0.20) -> None:
+    def __init__(
+        self,
+        dwell_seconds: float = 0.65,
+        poll_seconds: float = 0.20,
+        move_tolerance_px: float = 14.0,
+    ) -> None:
         self.dwell_seconds = dwell_seconds
         self.poll_seconds = poll_seconds
+        self.move_tolerance_px = move_tolerance_px
         self._desktop: Any | None = None
         self._next_poll = 0.0
         self._candidate_key: str | None = None
         self._candidate_started = 0.0
+        self._last_point: tuple[int, int] | None = None
         self._last_result = False
         self._last_descriptor = ""
         self._available = True
@@ -99,13 +107,22 @@ class TextInputDetector:
         hit, descriptor, key = self._hit_test(x, y)
 
         if not hit or key is None:
+            self._last_point = None
+
             self._candidate_key = None
             self._candidate_started = 0.0
             self._last_result = False
             self._last_descriptor = ""
             return False
 
-        if key != self._candidate_key:
+        moved = False
+        if self._last_point is not None:
+            dx = x - self._last_point[0]
+            dy = y - self._last_point[1]
+            moved = math.hypot(dx, dy) > self.move_tolerance_px
+        self._last_point = (x, y)
+
+        if moved or key != self._candidate_key:
             self._candidate_key = key
             self._candidate_started = now
             self._last_result = False
