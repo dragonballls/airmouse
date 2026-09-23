@@ -1,0 +1,88 @@
+name: Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "**.py"
+      - "requirements.txt"
+      - ".github/workflows/windows-exe.yml"
+      - "models/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run CI-safe tests
+        run: python -m pytest -q test_unified.py
+
+  build:
+    name: Build Airmouse.exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install application dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pyinstaller
+
+      - name: Get MediaPipe model
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force models | Out-Null
+          if (-not (Test-Path "models/hand_landmarker.task")) {
+            Invoke-WebRequest -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task" -OutFile "models/hand_landmarker.task"
+          }
+
+      - name: Build Windows GUI executable
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --windowed
+          --name Airmouse
+          --add-data "models/hand_landmarker.task:models"
+          --collect-all mediapipe
+          --paths .
+          desktop_app.py
+
+      - name: Verify executable exists
+        shell: powershell
+        run: |
+          if (-not (Test-Path "dist/Airmouse.exe")) { throw "dist/Airmouse.exe was not produced." }
+          $size = (Get-Item "dist/Airmouse.exe").Length
+          if ($size -lt 1000000) { throw "Executable is unexpectedly small: $size bytes." }
+          Write-Host "Airmouse.exe verified: $size bytes"
+
+      - name: Upload Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Airmouse-Windows-x64
+          path: dist/Airmouse.exe
+          if-no-files-found: error
