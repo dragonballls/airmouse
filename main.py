@@ -386,6 +386,29 @@ def run() -> None:
                     )
 
                 keyboard_toggle_authorized = ai_authorizes("keyboard_toggle", "left")
+
+                authorized_mouse_gesture = ai_gesture or None
+                if semantic_ai.enabled and decision is not None:
+                    gesture_target = {
+                        "left_click": "right",
+                        "right_click": "right",
+                        "drag": "right",
+                        "scroll_up": "right",
+                        "scroll_down": "right",
+                        "zoom_in": "both",
+                        "zoom_out": "both",
+                    }.get(decision.gesture)
+                    if gesture_target is not None:
+                        target_ok = (
+                            decision.target_hand == gesture_target
+                            or (
+                                gesture_target == "right"
+                                and decision.target_hand == "both"
+                            )
+                        )
+                        if not target_ok:
+                            authorized_mouse_gesture = None
+
                 if toggle.update(hands.left, authorized=keyboard_toggle_authorized):
                     keyboard.toggle()
                     processor.reset()
@@ -419,7 +442,7 @@ def run() -> None:
                 else:
                     processor.process(
                         hands,
-                        ai_gesture=ai_gesture or None,
+                        ai_gesture=authorized_mouse_gesture,
                     )
                     frame = cv2.flip(frame, 1)
 
