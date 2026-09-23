@@ -78,9 +78,11 @@ class MouseActuator:
         total_height: Physical pixel height of the full virtual desktop
     """
 
-    def __init__(self, total_width: int, total_height: int) -> None:
+    def __init__(self, total_width: int, total_height: int, origin_x: int = 0, origin_y: int = 0) -> None:
         self._total_w = total_width
         self._total_h = total_height
+        self._origin_x = origin_x
+        self._origin_y = origin_y
         self._pynput = MouseController()
         self._dragging = False
         self._keyboard = KeyboardController()
@@ -91,8 +93,8 @@ class MouseActuator:
         Move cursor to absolute desktop coordinates (physical pixels).
         Maps to SendInput's [0, 65535] normalized space.
         """
-        norm_x = int(x * 65535 / max(self._total_w - 1, 1))
-        norm_y = int(y * 65535 / max(self._total_h - 1, 1))
+        norm_x = int((x - self._origin_x) * 65535 / max(self._total_w - 1, 1))
+        norm_y = int((y - self._origin_y) * 65535 / max(self._total_h - 1, 1))
 
         # Clamp to valid range
         norm_x = max(0, min(65535, norm_x))

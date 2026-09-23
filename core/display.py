@@ -49,9 +49,11 @@ class VirtualDesktop:
     Immutable snapshot of the virtual desktop geometry.
     All values are in physical pixels.
     """
-    total_width: int     # Sum of all monitor widths
-    total_height: int    # Height of the tallest monitor
+    total_width: int
+    total_height: int
     monitor_count: int
+    origin_x: int = 0
+    origin_y: int = 0
 
 
 def build_virtual_desktop() -> VirtualDesktop:
@@ -83,6 +85,8 @@ def build_virtual_desktop() -> VirtualDesktop:
         total_width=total_w,
         total_height=total_h,
         monitor_count=len(monitors),
+        origin_x=min_x,
+        origin_y=min_y,
     )
 
 
@@ -139,8 +143,12 @@ def map_to_desktop(
     py = max(trackpad.y_min, min(trackpad.y_max, py))
 
     # Interpolate to desktop space
-    screen_x = int(np.interp(px, [trackpad.x_min, trackpad.x_max], [0, desktop.total_width - 1]))
-    screen_y = int(np.interp(py, [trackpad.y_min, trackpad.y_max], [0, desktop.total_height - 1]))
+    screen_x = desktop.origin_x + int(
+        np.interp(px, [trackpad.x_min, trackpad.x_max], [0, desktop.total_width - 1])
+    )
+    screen_y = desktop.origin_y + int(
+        np.interp(py, [trackpad.y_min, trackpad.y_max], [0, desktop.total_height - 1])
+    )
 
     return screen_x, screen_y
 

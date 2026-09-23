@@ -151,7 +151,18 @@ class SemanticGestureAI:
         with self._lock:
             if self._future_generation != self._generation:
                 return None
-            self._decision = decision
+
+            # Do not let a transient unknown/low-confidence refresh erase a
+            # still-valid decision for the same candidate. This keeps click,
+            # drag, and typing authorization stable across model latency.
+            if (
+                decision.gesture != "unknown"
+                and decision.gesture != "none"
+                and decision.confidence >= self._min_confidence
+            ):
+                self._decision = decision
+            else:
+                decision = self._decision
         return decision
 
     def current(
@@ -226,6 +237,23 @@ class SemanticGestureAI:
         target_hand = str(result.get("target_hand", "unknown")).strip().lower()
         if target_hand not in {"left", "right", "both", "none", "unknown"}:
             target_hand = "unknown"
+
+        expected_target = {
+            "index_pinch": "right",
+            "middle_pinch": "right",
+            "scroll_sign": "right",
+            "two_hand_pinch": "both",
+            "keyboard_toggle": "left",
+            "keyboard_type": "right",
+        }.get(candidate)
+        if expected_target is not None:
+            target_ok = (
+                target_hand == expected_target
+                or (expected_target == "right" and target_hand == "both")
+            )
+            if not target_ok:
+                gesture = "unknown"
+                confidence = 0.0
 
         try:
             confidence = float(result.get("confidence", 0.0))

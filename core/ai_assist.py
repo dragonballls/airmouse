@@ -151,6 +151,7 @@ class AIAssistant:
             "zoom_in",
             "zoom_out",
             "keyboard_toggle",
+            "keyboard_type",
             "unknown",
         ]
         schema = {
@@ -189,7 +190,8 @@ class AIAssistant:
             "pinch is intentional; drag means a sustained intentional pinch; "
             "scroll means the deliberate scroll sign plus motion; zoom means "
             "both hands performing the deliberate zoom gesture; keyboard_toggle "
-            "means the dedicated three-finger left-hand sign. "
+            "means the dedicated three-finger left-hand sign; keyboard_type "
+            "means the right-hand thumb-index pinch over a stabilized keyboard key. "
             "Return only the requested JSON object."
         )
 

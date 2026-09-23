@@ -288,3 +288,80 @@ def test_stale_ai_generation_cannot_be_accepted():
     semantic.clear()
     assert semantic.current(None, grace=1.0) is None
     semantic.close()
+
+
+
+def test_semantic_ai_retains_valid_decision_through_unknown_refresh():
+    from core.gesture_ai import GestureDecision, SemanticGestureAI
+
+    class FakeAssistant:
+        enabled = False
+        provider = ""
+
+    class FakeFuture:
+        def done(self):
+            return True
+
+        def result(self):
+            return GestureDecision(
+                gesture="unknown",
+                target_hand="unknown",
+                confidence=0.0,
+                candidate="index_pinch",
+                created_at=0.0,
+            )
+
+    import time
+    semantic = SemanticGestureAI(FakeAssistant())
+    semantic._decision = GestureDecision(
+        gesture="left_click",
+        target_hand="right",
+        confidence=0.95,
+        candidate="index_pinch",
+        created_at=time.perf_counter(),
+    )
+    semantic._generation = 4
+    semantic._future_generation = 4
+    semantic._future = FakeFuture()
+    decision = semantic.poll()
+    assert decision is not None
+    assert decision.gesture == "left_click"
+    semantic.close()
+
+
+def test_semantic_ai_rejects_wrong_hand_for_candidate():
+    from core.gesture_ai import SemanticGestureAI
+
+    class FakeAssistant:
+        enabled = True
+        provider = "gemini"
+
+        def classify_semantic_gesture(self, **_kwargs):
+            return {
+                "gesture": "keyboard_type",
+                "target_hand": "left",
+                "confidence": 0.95,
+            }
+
+    semantic = SemanticGestureAI(FakeAssistant())
+    decision = semantic._classify(_landmarks(), "keyboard_type", "keyboard", "left hand")
+    assert decision.gesture == "unknown"
+    assert decision.confidence == 0.0
+    semantic.close()
+
+
+def test_virtual_desktop_preserves_negative_monitor_origin():
+    from core.display import TrackpadZone, VirtualDesktop, map_to_desktop
+
+    desktop = VirtualDesktop(
+        total_width=3840,
+        total_height=1080,
+        monitor_count=2,
+        origin_x=-1920,
+        origin_y=0,
+    )
+    zone = TrackpadZone(100, 1180, 100, 620)
+    left = map_to_desktop(1.0, 0.5, zone, desktop)
+    right = map_to_desktop(0.0, 0.5, zone, desktop)
+    assert left[0] == -1920
+    assert right[0] == 1919

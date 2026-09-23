@@ -25,6 +25,7 @@ from config import (
     AI_GESTURE_MAX_AGE_S,
     AI_GESTURE_MIN_CONFIDENCE,
     AI_GESTURE_GRACE_S,
+    THUMB_INDEX_CLICK_DIST,
     SHOW_CAMERA_UI,
     TIMER_RESOLUTION_MS,
 )
@@ -186,14 +187,14 @@ def _gesture_candidate(
 
     if keyboard_visible:
         if right and len(right) >= 21:
-            index_pinch = normalized_distance(right, 4, 8) <= 0.28
+            index_pinch = normalized_distance(right, 4, 8) <= THUMB_INDEX_CLICK_DIST
             if index_pinch:
                 return "keyboard_type", "Right-hand thumb-index pinch is present over the virtual keyboard."
         return None, "No deliberate keyboard gesture candidate."
 
     if left and right and len(left) >= 21 and len(right) >= 21:
-        left_pinch = normalized_distance(left, 4, 8) <= 0.28
-        right_pinch = normalized_distance(right, 4, 8) <= 0.28
+        left_pinch = normalized_distance(left, 4, 8) <= THUMB_INDEX_CLICK_DIST
+        right_pinch = normalized_distance(right, 4, 8) <= THUMB_INDEX_CLICK_DIST
         if left_pinch and right_pinch:
             direction = (
                 "apart" if two_hand_delta > 0
@@ -207,8 +208,8 @@ def _gesture_candidate(
             )
 
     if right and len(right) >= 21:
-        index_pinch = normalized_distance(right, 4, 8) <= 0.28
-        middle_pinch = normalized_distance(right, 4, 12) <= 0.28
+        index_pinch = normalized_distance(right, 4, 8) <= THUMB_INDEX_CLICK_DIST
+        middle_pinch = normalized_distance(right, 4, 12) <= THUMB_INDEX_CLICK_DIST
         if middle_pinch and not index_pinch:
             return "middle_pinch", "Right thumb-middle pinch is present."
         if index_pinch:
@@ -219,7 +220,7 @@ def _gesture_candidate(
 
     return None, "No deliberate gesture candidate."
 
-def _ai_frame_crop(frame, hands) :
+def _ai_frame_crop(frame, hands):
     """Crop the AI input around visible hands while retaining generous context."""
     if frame is None or not getattr(frame, "size", 0):
         return frame
@@ -347,7 +348,12 @@ def run() -> None:
 
     desktop = build_virtual_desktop()
     trackpad = build_trackpad_zone()
-    actuator = MouseActuator(desktop.total_width, desktop.total_height)
+    actuator = MouseActuator(
+        desktop.total_width,
+        desktop.total_height,
+        origin_x=desktop.origin_x,
+        origin_y=desktop.origin_y,
+    )
     processor = GestureOrchestrator(
         actuator,
         desktop,
