@@ -12,6 +12,7 @@ import traceback
 from typing import Optional
 
 import cv2
+import numpy as np
 import psutil
 
 from config import (
@@ -368,12 +369,34 @@ def run() -> None:
     fps_frames = 0
     fps = 0.0
     window = "Unified Air Control"
+    keyboard_window = "AirMouse Keyboard"
+    keyboard_window_created = False
+
+    def _draw_hand_overlay(canvas, landmarks):
+        """Draw the AirNav-style dots/lines without exposing the live camera."""
+        if not landmarks or len(landmarks) < 21:
+            return
+        connections = (
+            (0, 1), (1, 2), (2, 3), (3, 4),
+            (0, 5), (5, 6), (6, 7), (7, 8),
+            (5, 9), (9, 10), (10, 11), (11, 12),
+            (9, 13), (13, 14), (14, 15), (15, 16),
+            (13, 17), (17, 18), (18, 19), (19, 20),
+            (0, 17),
+        )
+        h, w = canvas.shape[:2]
+        points = [(int((1.0 - lm.x) * w), int(lm.y * h)) for lm in landmarks]
+        for a, b in connections:
+            cv2.line(canvas, points[a], points[b], (120, 180, 255), 2, cv2.LINE_AA)
+        for px, py in points:
+            cv2.circle(canvas, (px, py), 4, (80, 220, 255), -1, cv2.LINE_AA)
 
     try:
         with AsyncCamera() as camera, HandTracker() as tracker:
             if SHOW_CAMERA_UI:
                 cv2.namedWindow(window, cv2.WINDOW_NORMAL)
                 cv2.resizeWindow(window, CAMERA_WIDTH, CAMERA_HEIGHT)
+                keyboard_window_created = False
 
             while True:
                 frame = camera.read()
@@ -514,7 +537,26 @@ def run() -> None:
 
                 if keyboard.visible:
                     active = hands.right
-                    display = cv2.flip(frame, 1)
+                    if not keyboard_window_created:
+                        cv2.namedWindow(keyboard_window, cv2.WINDOW_NORMAL)
+                        cv2.resizeWindow(keyboard_window, CAMERA_WIDTH, CAMERA_HEIGHT)
+                        keyboard_window_created = True
+
+                    if SHOW_CAMERA_UI:
+                        display = cv2.flip(frame, 1)
+                    else:
+                        display = np.zeros((CAMERA_HEIGHT, CAMERA_WIDTH, 3), dtype=np.uint8)
+                        cv2.putText(
+                            display,
+                            "CAMERA PREVIEW OFF",
+                            (18, 112),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.55,
+                            (150, 160, 175),
+                            1,
+                            cv2.LINE_AA,
+                        )
+                    _draw_hand_overlay(display, active)
                     if active and len(active) >= 21:
                         ix, iy = _mirror(active[8], frame.shape[1], frame.shape[0])
                         tx, ty = _mirror(active[4], frame.shape[1], frame.shape[0])
@@ -561,9 +603,17 @@ def run() -> None:
                 if DEBUG_GESTURES:
                     cv2.imshow("AirMouse Debug", draw_debug_frame(frame, hands, processor.right_state))
 
-                if SHOW_CAMERA_UI:
+                if keyboard.visible:
+                    cv2.imshow(keyboard_window, frame)
+                    key = cv2.waitKey(1) & 0xFF
+                elif SHOW_CAMERA_UI:
+                    if keyboard_window_created:
+                        cv2.destroyWindow(keyboard_window)
+                        keyboard_window_created = False
                     cv2.imshow(window, frame)
                     key = cv2.waitKey(1) & 0xFF
+                else:
+                    key = -1
                     if key in (ord("q"), ord("Q"), 27):
                         break
                     if key in (ord("k"), ord("K")):
@@ -582,6 +632,8 @@ def run() -> None:
         if actuator.is_dragging:
             actuator.drag_end()
         keyboard.close()
+        if keyboard_window_created:
+            cv2.destroyWindow(keyboard_window)
         if SHOW_CAMERA_UI or DEBUG_GESTURES:
             cv2.destroyAllWindows()
         _restore_windows_settings(original_settings)
