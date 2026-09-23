@@ -51,6 +51,11 @@ class GestureOrchestrator:
         if hands.left is not None and hands.right is not None:
             self._two.process(hands.left, hands.right)
 
+    def reset(self) -> None:
+        """Release any held OS input and reset all gesture state."""
+        self._right.process(None)
+        self._left.process(None)
+
     @property
     def right_state(self) -> str:
         return self._right._state.name
