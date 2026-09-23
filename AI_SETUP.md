@@ -1,63 +1,89 @@
-# Optional AI vision assistant
+# AI gesture control
 
-The air-mouse performs latency-sensitive hand tracking locally. The AI API is called only when you explicitly press A in the camera window.
+The air-mouse keeps latency-sensitive MediaPipe hand tracking local for cursor
+movement, while Gemini provides semantic classification for deliberate gesture
+candidates.
 
 ## Configure
 
-Google Gemini is supported directly. Google documents GEMINI_API_KEY or GOOGLE_API_KEY as environment-variable configuration for the Gemini SDK.
-
-On Windows PowerShell, store the key as a user environment variable without printing it:
+Google Gemini is supported directly. Set the key as a Windows user variable
+without printing it:
 
     [Environment]::SetEnvironmentVariable("GEMINI_API_KEY","YOUR_KEY","User")
 
-Then open a new PowerShell session.
+Default live gesture model:
 
-Default Gemini model:
+    gemini-3.5-flash-lite
 
-    gemini-2.5-flash-lite
+Override it with GEMINI_MODEL when needed.
 
-Override it when needed:
-
-    [Environment]::SetEnvironmentVariable("GEMINI_MODEL","YOUR_MODEL","User")
-
-OpenAI remains supported as a fallback:
+OpenAI remains available for the explicit A-key diagnostic fallback:
 
     [Environment]::SetEnvironmentVariable("OPENAI_API_KEY","YOUR_KEY","User")
     [Environment]::SetEnvironmentVariable("OPENAI_MODEL","gpt-5.6","User")
 
 Never commit an API key to the repository.
 
-## What the AI does
+## Live AI gesture layer
 
-A single compressed JPEG camera frame is sent for an explicit diagnostic request. The assistant describes the apparent hand pose and can suggest a calibration change.
+When Gemini is configured, deliberate actions use a closed semantic label set:
 
-The AI response is advisory only. It cannot directly issue mouse clicks, keyboard events, window switches, or lock the computer.
+- left_click
+- right_click
+- drag
+- scroll_up
+- scroll_down
+- zoom_in
+- zoom_out
+- keyboard_toggle
+- keyboard_type
+- unknown
+
+The camera frame and a small local-tracker hint are sent asynchronously to
+Gemini only for deliberate gesture candidates, rather than on every camera
+frame. The classifier returns structured JSON containing the gesture,
+target hand, and confidence.
+
+The AI does not receive OS-control tools or arbitrary commands. The application
+accepts only the predefined labels and also checks the expected hand before
+executing an action. Low-confidence, stale, unknown, or wrong-hand decisions
+are rejected.
+
+Pointer movement remains local so network latency does not make the cursor
+jerky. Click/drag/scroll/zoom and keyboard actions are AI-authorized when the
+Gemini gate is enabled.
 
 ## Controls
 
 ### Mouse mode
 
-- Right index finger: local cursor
-- Stable thumb + index pinch, then release: left click
-- Stable thumb + middle pinch, then release: right click
-- Deliberate pinch hold: drag
-- Stable peace pose + wrist movement: scroll
-- Fist: pause right-hand mouse actions
+- Right index finger: point/move
+- Thumb + index pinch: AI distinguishes left click versus sustained drag
+- Thumb + middle pinch: AI-authorized right click
+- Peace sign + wrist movement: AI determines scroll direction
+- Fist: local safety lock
 
 ### Two hands
 
-Both hands holding a deliberate thumb/index pinch enters a protected zoom gesture. Moving the wrists apart or together far enough produces one zoom event. The gesture must be released before another zoom can fire.
+Both hands holding a deliberate thumb-index pinch create a protected zoom
+candidate. Gemini classifies zoom direction and the local two-hand state gate
+requires both hands.
 
 ### Keyboard
 
-Raise three fingers (index, middle, ring) on the left hand and hold for about one second. The pose must become stable first, and the hand must be released before another toggle can occur.
+Raise three fingers (index, middle, ring) on the left hand and hold for about
+one second. Gemini must identify the left-hand keyboard-toggle sign.
 
-Once visible, only the right hand types:
+Once visible, only the right hand types. Gemini authorizes the right-hand
+thumb-index typing sign before a key is sent.
 
-- hover an on-screen key with the index finger
-- pinch thumb + index to type
-- move while pinching to glide between keys
+K manually toggles the keyboard for emergency/manual control.
+A requests one explicit visual diagnostic.
+Q or Esc quits.
 
-K toggles the keyboard manually.
+## Reliability model
 
-A requests one explicit AI diagnostic. Q or Esc quits.
+MediaPipe is still the continuous tracker. Gemini is the semantic layer: it
+helps distinguish the intended sign/action and the performing hand, while
+local stable-frame, release, cooldown, and action-boundary checks remain in
+place.
