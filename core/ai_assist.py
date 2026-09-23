@@ -16,6 +16,8 @@ from typing import Any
 import cv2
 import numpy as np
 
+from config import AI_VISION_MAX_WIDTH
+
 
 class AIAssistant:
     def __init__(self) -> None:
@@ -93,7 +95,7 @@ class AIAssistant:
 
         image = frame
         height, width = image.shape[:2]
-        max_width = 640
+        max_width = max(160, int(AI_VISION_MAX_WIDTH))
         if width > max_width:
             scale = max_width / width
             image = cv2.resize(
