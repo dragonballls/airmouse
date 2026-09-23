@@ -60,12 +60,12 @@ class VirtualKeyboard:
         key_width: int = 70,
         key_height: int = 70,
         key_margin: int = 8,
-        pinch_on_threshold: float = 40.0,
-        pinch_off_threshold: float = 54.0,
-        key_switch_delay: float = 0.15,
+        pinch_on_threshold: float = 52.0,
+        pinch_off_threshold: float = 68.0,
+        key_switch_delay: float = 0.10,
         hover_alpha: float = 0.32,
-        hover_stable_frames: int = 3,
-        key_hit_padding: int = 14,
+        hover_stable_frames: int = 2,
+        key_hit_padding: int = 22,
     ):
         self.frame_width = frame_width
         self.frame_height = frame_height
