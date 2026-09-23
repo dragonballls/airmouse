@@ -169,7 +169,12 @@ class KeyboardToggle:
         return max(0.0, min(1.0, (time.perf_counter() - self.started) / self.hold_seconds))
 
 
-def _gesture_candidate(hands, keyboard_visible: bool, wrist_dy: float) -> tuple[str | None, str]:
+def _gesture_candidate(
+    hands,
+    keyboard_visible: bool,
+    wrist_dy: float,
+    two_hand_delta: float,
+) -> tuple[str | None, str]:
     """Return a semantic AI candidate and a non-authoritative local hint."""
     left = hands.left
     right = hands.right
@@ -189,7 +194,16 @@ def _gesture_candidate(hands, keyboard_visible: bool, wrist_dy: float) -> tuple[
         left_pinch = normalized_distance(left, 4, 8) <= 0.28
         right_pinch = normalized_distance(right, 4, 8) <= 0.28
         if left_pinch and right_pinch:
-            return "two_hand_pinch", "Both hands are holding thumb-index pinches."
+            direction = (
+                "apart" if two_hand_delta > 0
+                else "together" if two_hand_delta < 0
+                else "stationary"
+            )
+            return (
+                "two_hand_pinch",
+                f"Both hands are holding thumb-index pinches; wrist separation is moving {direction} "
+                f"(delta={two_hand_delta:.4f}).",
+            )
 
     if right and len(right) >= 21:
         index_pinch = normalized_distance(right, 4, 8) <= 0.28
@@ -285,6 +299,7 @@ def run() -> None:
     ai_gesture = ""
     ai_confidence = 0.0
     previous_right_wrist_y: float | None = None
+    previous_two_hand_distance: float | None = None
     pinch_candidate_started: float | None = None
     previous_candidate: str | None = None
 
@@ -330,17 +345,40 @@ def run() -> None:
 
                 now = time.perf_counter()
                 wrist_dy = 0.0
+                two_hand_delta = 0.0
                 if hands.right and len(hands.right) >= 21 and previous_right_wrist_y is not None:
                     wrist_dy = hands.right[0].y - previous_right_wrist_y
+                if (
+                    hands.left and hands.right
+                    and len(hands.left) >= 21
+                    and len(hands.right) >= 21
+                    and previous_two_hand_distance is not None
+                ):
+                    current_two_hand_distance = abs(
+                        hands.right[0].x - hands.left[0].x
+                    )
+                    two_hand_delta = current_two_hand_distance - previous_two_hand_distance
                 if hands.right and len(hands.right) >= 21:
                     previous_right_wrist_y = hands.right[0].y
                 else:
                     previous_right_wrist_y = None
 
+                if (
+                    hands.left and hands.right
+                    and len(hands.left) >= 21
+                    and len(hands.right) >= 21
+                ):
+                    previous_two_hand_distance = abs(
+                        hands.right[0].x - hands.left[0].x
+                    )
+                else:
+                    previous_two_hand_distance = None
+
                 candidate, hands_hint = _gesture_candidate(
                     hands,
                     keyboard.visible,
                     wrist_dy,
+                    two_hand_delta,
                 )
 
                 if candidate != previous_candidate:
