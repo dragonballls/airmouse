@@ -89,7 +89,7 @@ class SemanticGestureAI:
         hands_hint: str,
     ) -> None:
         """Submit a candidate only when it changes or enough time has elapsed."""
-        if not self.enabled or frame is None:
+        if not self.enabled or frame is None or not candidate:
             return
 
         now = time.perf_counter()
