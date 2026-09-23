@@ -45,6 +45,11 @@ class SemanticGestureAI:
     def __init__(self, assistant: Any, min_confidence: float = 0.68) -> None:
         self._assistant = assistant
         self._min_confidence = min_confidence
+        try:
+            from core.jev_assist import JevGestureClassifier
+            self._jev = JevGestureClassifier(min_confidence=min_confidence)
+        except Exception:
+            self._jev = None
         self._lock = threading.Lock()
         self._future: Any | None = None
         self._executor: Any | None = None
@@ -62,18 +67,25 @@ class SemanticGestureAI:
 
     @property
     def enabled(self) -> bool:
-        return bool(self._assistant.enabled and self._assistant.provider == "gemini")
+        return bool(
+            (self._jev is not None and self._jev.enabled)
+            or (self._assistant.enabled and self._assistant.provider == "gemini")
+        )
 
     @property
     def status(self) -> str:
-        if self.enabled:
-            return "AI gesture gate ready"
+        if self._jev is not None and self._jev.enabled:
+            return f"AI gesture gate ready (Jev {self._jev.model})"
+        if self._assistant.enabled and self._assistant.provider == "gemini":
+            return f"AI gesture gate ready (Gemini {self._assistant.model})"
         return "AI gesture gate unavailable"
 
     def close(self) -> None:
         if self._executor is not None:
             self._executor.shutdown(wait=False, cancel_futures=True)
             self._executor = None
+        if self._jev is not None:
+            self._jev.close()
 
     def clear(self) -> None:
         with self._lock:
@@ -154,12 +166,31 @@ class SemanticGestureAI:
         mode: str,
         hands_hint: str,
     ) -> GestureDecision:
-        result = self._assistant.classify_semantic_gesture(
-            frame=frame,
-            candidate=candidate,
-            mode=mode,
-            hands_hint=hands_hint,
-        )
+        result: dict[str, Any] | None = None
+
+        # Jev is the fast primary semantic judge over compact tracker state.
+        if self._jev is not None and self._jev.enabled:
+            result = self._jev.classify(
+                candidate=candidate,
+                mode=mode,
+                hands_hint=hands_hint,
+            )
+            try:
+                confidence = float(result.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if result.get("gesture") in {"unknown", "none"} or confidence < self._min_confidence:
+                result = None
+
+        # Gemini sees the camera only when the fast typed judge is unavailable
+        # or uncertain. This is intentionally an ambiguity fallback.
+        if result is None:
+            result = self._assistant.classify_semantic_gesture(
+                frame=frame,
+                candidate=candidate,
+                mode=mode,
+                hands_hint=hands_hint,
+            )
         gesture = str(result.get("gesture", "unknown")).strip().lower()
         if gesture not in GESTURE_LABELS:
             gesture = "unknown"
