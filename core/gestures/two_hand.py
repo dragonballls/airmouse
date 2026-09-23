@@ -44,6 +44,14 @@ class TwoHandProcessor:
         self._last_frame_time: float | None = None
         self._prev_right_wrist_x: float | None = None
 
+    def reset(self) -> None:
+        """Clear two-hand gesture state without emitting an OS action."""
+        self._prev_wrist_dist = None
+        self._both_fists_since = None
+        self._lock_fired = False
+        self._last_frame_time = None
+        self._prev_right_wrist_x = None
+
     def process(self, left_lm: list[Landmark], right_lm: list[Landmark]) -> None:
         now = time.perf_counter()
         dt = (now - self._last_frame_time) if self._last_frame_time is not None else (1.0 / CAMERA_FPS)
