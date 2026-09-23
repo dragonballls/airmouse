@@ -204,3 +204,26 @@ def test_jev_classifier_uses_typed_choice(monkeypatch):
     assert result["gesture"] == "right_click"
     assert result["target_hand"] == "right"
     assert result["confidence"] == 0.93
+
+
+def test_semantic_decision_survives_release_grace():
+    from core.gesture_ai import GestureDecision, SemanticGestureAI
+    import time
+
+    class FakeAssistant:
+        enabled = False
+        provider = ""
+
+    semantic = SemanticGestureAI(FakeAssistant())
+    semantic._decision = GestureDecision(
+        gesture="left_click",
+        target_hand="right",
+        confidence=0.95,
+        candidate="index_pinch",
+        created_at=time.perf_counter(),
+    )
+    decision = semantic.current(None, max_age=0.1, grace=0.9)
+    assert decision is not None
+    assert decision.gesture == "left_click"
+    assert decision.target_hand == "right"
+    semantic.close()
