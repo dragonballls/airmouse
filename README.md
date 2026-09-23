@@ -19,9 +19,9 @@
 
 ## What is this?
 
-AI Air Mouse uses your webcam and [MediaPipe's hand landmark model](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) to track your hands in real time and translate gestures into mouse and keyboard actions — entirely on your device, with zero cloud calls.
+AI Air Mouse uses your webcam and [MediaPipe's hand landmark model](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) to track both hands in real time and translate gestures into mouse and keyboard actions. Local tracking stays on-device; optional Gemini vision and Jev semantic decisions run in the cloud only for deliberate gesture candidates.
 
-The interaction model is inspired by **Apple Vision Pro**: your thumb is always the trigger, your index finger is always the pointer, and there are no ambiguous multi-finger combinations. The right hand owns the mouse; the left hand optionally controls Windows system shortcuts. Together they support clicks, drag, scroll, zoom, window snapping, and more.
+The interaction model is inspired by **Apple Vision Pro**: your thumb is always the trigger, your index finger is always the pointer, and there are no ambiguous multi-finger combinations. The right hand owns the mouse; the left hand is reserved for the protected keyboard-toggle gesture in the current safe profile. Together they support clicks, drag, scroll, zoom, window snapping, and more.
 
 ```
 Webcam → MediaPipe (21 landmarks per hand) → Gesture State Machines → SendInput / pynput → Windows
@@ -46,7 +46,7 @@ Everything runs in a tight async loop. Frame capture never blocks inference. Cur
 ## Quick Start
 
 ```powershell
-git clone https://github.com/Rcidshacker/airmouse.git
+git clone https://github.com/dragonballls/airmouse.git
 cd airmouse
 
 # Create virtual environment
