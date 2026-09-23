@@ -1,4 +1,4 @@
-"""CI-safe tests for the unified keyboard/control integration.""
+"""CI-safe tests for the unified keyboard/control integration."""
 
 from unittest.mock import Mock
 
