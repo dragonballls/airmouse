@@ -146,3 +146,61 @@ def test_keyboard_does_not_type_without_ai_authorization():
     assert not vk.pyautogui.write.called
     assert not vk.pyautogui.press.called
     keyboard.close()
+
+
+def test_jev_classifier_is_optional_without_a_key(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    from core.jev_assist import JevGestureClassifier
+
+    classifier = JevGestureClassifier()
+    assert classifier.enabled is False
+
+
+def test_jev_classifier_uses_typed_choice(monkeypatch):
+    import sys
+    import types as pytypes
+
+    class FakeAnswer:
+        choice = "right_click"
+        confidence = 0.93
+        probabilities = {"right_click": 0.93, "none": 0.07}
+
+    class FakeResponse:
+        model = "jev-test"
+
+        @property
+        def choices(self):
+            return {"gesture": FakeAnswer()}
+
+    class FakeChoice:
+        def __init__(self, instructions, criteria):
+            self.instructions = instructions
+            self.criteria = criteria
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def system_one(self, state, questions):
+            assert state["candidate"] == "middle_pinch"
+            assert "right_click" in questions["gesture"].criteria
+            return FakeResponse()
+
+    fake = pytypes.ModuleType("typesafe_sdk")
+    fake.Choice = FakeChoice
+    fake.TypeSafeClient = FakeClient
+    monkeypatch.setitem(sys.modules, "typesafe_sdk", fake)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+
+    from core import jev_assist
+    classifier = jev_assist.JevGestureClassifier()
+    result = classifier.classify("middle_pinch", "mouse", "right hand")
+    assert result["gesture"] == "right_click"
+    assert result["target_hand"] == "right"
+    assert result["confidence"] == 0.93
