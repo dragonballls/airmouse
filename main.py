@@ -26,6 +26,7 @@ import ctypes
 import logging
 import os
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -231,7 +232,10 @@ def _draw_mouse_ui(frame, hands, fps: float) -> None:
 def run(stop_event=None) -> None:
     original_settings = {}
     keyboard = VirtualKeyboard(CAMERA_WIDTH, CAMERA_HEIGHT)
-    toggle = KeyboardToggle()
+    keyboard_toggle_event = threading.Event()
+    owns_stop_event = stop_event is None
+    stop_event = stop_event or threading.Event()
+    hotkeys = None
 
     def emergency_restore():
         keyboard.close()
@@ -240,7 +244,21 @@ def run(stop_event=None) -> None:
 
     atexit.register(emergency_restore)
 
-    logger.info("=== Unified Airmouse + Virtual Keyboard starting ===")
+    # The packaged app must not depend on an OpenCV window being focused.
+    # Use global hotkeys for lifecycle control instead.
+    if owns_stop_event:
+        try:
+            from pynput import keyboard as pynput_keyboard
+            hotkeys = pynput_keyboard.GlobalHotKeys({
+                "<ctrl>+<alt>+q": stop_event.set,
+                "<ctrl>+<alt>+k": keyboard_toggle_event.set,
+            })
+            hotkeys.start()
+            logger.info("Global hotkeys active: Ctrl+Alt+Q = quit; Ctrl+Alt+K = keyboard toggle")
+        except Exception as exc:
+            logger.warning("Global hotkeys unavailable: %s", exc)
+
+    logger.info("=== Unified Airmouse starting (camera UI disabled) ===")
     original_settings.update(_apply_windows_performance())
 
     desktop = build_virtual_desktop()
@@ -267,13 +285,18 @@ def run(stop_event=None) -> None:
 
                 hands = tracker.process(frame)
 
-                if toggle.update(hands.left):
-                    keyboard.toggle()
-                    processor.reset()
-                    logger.info(
-                        "Virtual keyboard %s",
-                        "enabled" if keyboard.visible else "disabled",
-                    )
+                if keyboard_toggle_event.is_set():
+                    keyboard_toggle_event.clear()
+                    # Keep the virtual keyboard disabled in headless mode.
+                    if SHOW_CAMERA_UI:
+                        keyboard.toggle()
+                        processor.reset()
+                        logger.info(
+                            "Virtual keyboard %s",
+                            "enabled" if keyboard.visible else "disabled",
+                        )
+                    else:
+                        logger.info("Virtual keyboard toggle ignored because camera UI is disabled")
 
                 if keyboard.visible:
                     active = hands.right or hands.left
@@ -324,6 +347,11 @@ def run(stop_event=None) -> None:
         if actuator.is_dragging:
             actuator.drag_end()
         keyboard.close()
+        if hotkeys is not None:
+            try:
+                hotkeys.stop()
+            except Exception:
+                pass
         if SHOW_CAMERA_UI or DEBUG_GESTURES:
             cv2.destroyAllWindows()
         _restore_windows_settings(original_settings)
