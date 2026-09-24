@@ -48,7 +48,7 @@ def test_hands_only_toggle_helper():
     assert callable(_keyboard_toggle_pose)
     assert CAMERA_WIDTH > 0
     assert CAMERA_HEIGHT > 0
-    assert isinstance(SHOW_CAMERA_UI, bool)
+    assert SHOW_CAMERA_UI is False
 
 
 
